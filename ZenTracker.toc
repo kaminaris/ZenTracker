@@ -1,0 +1,15 @@
+## Title: ZenTracker
+## Version: 8.0.0
+## Author: Zen, Kaminaris
+## Interface: 80000
+## X-Curse-Project-ID: 11
+## X-WoWI-ID: 11
+## Dependencies: WeakAuras
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibGroupInSpecT-1.1\LibGroupInSpecT-1.1.lua
+
+main.lua
+eventframe.lua
+

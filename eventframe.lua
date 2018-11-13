@@ -1,14 +1,10 @@
-local _, ZT = ...;
+local addonName, ZT = ...;
 
 local eventFrame = CreateFrame('Frame');
 
 ZT.eventFrame = eventFrame;
 
-eventFrame:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED');
-eventFrame:RegisterEvent('CHALLENGE_MODE_START');
-eventFrame:RegisterEvent('ENCOUNTER_END');
-eventFrame:RegisterEvent('CHAT_MSG_ADDON');
-eventFrame:RegisterEvent('GROUP_JOINED');
+eventFrame:RegisterEvent('ADDON_LOADED');
 
 eventFrame:SetScript('OnEvent', function(self, e, ...)
 	self[e](self, e, ...);
@@ -44,6 +40,21 @@ end
 
 function eventFrame:GROUP_JOINED()
 	ZT:sendHandshake()
+end
+
+function eventFrame:ADDON_LOADED(event, addon)
+	if addon ~= addonName then
+		return;
+	end
+
+	ZT:RegisterOptions();
+	ZT:Init();
+
+	eventFrame:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED');
+	eventFrame:RegisterEvent('CHALLENGE_MODE_START');
+	eventFrame:RegisterEvent('ENCOUNTER_END');
+	eventFrame:RegisterEvent('CHAT_MSG_ADDON');
+	eventFrame:RegisterEvent('GROUP_JOINED');
 end
 
 local origScanEvents = WeakAuras.ScanEvents;

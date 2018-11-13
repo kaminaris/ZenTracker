@@ -5,11 +5,13 @@
 ## X-Curse-Project-ID: 11
 ## X-WoWI-ID: 11
 ## Dependencies: WeakAuras
+## SavedVariables: ZenTrackerDb
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\LibGroupInSpecT-1.1\LibGroupInSpecT-1.1.lua
+Libs\StdUi\StdUi.xml
 
 main.lua
 eventframe.lua
-
+options.lua

@@ -1,39 +1,6 @@
 local _, ZT = ...;
 
---------------------------------------------------------------------------------
--- BEGIN CONFIGURATION
---------------------------------------------------------------------------------
-
--- Option #1: Whether to show your own cooldowns on a per-type basis
-ZT.showMine = {
-	["INTERRUPT"]  = true,
-	["HARDCC"]     = true,
-	["STHARDCC"]   = true,
-	["SOFTCC"]     = true,
-	["STSOFTCC"]   = true,
-	["EXTERNAL"]   = true,
-	["HEALING"]    = true,
-	["DISPEL"]     = true,
-	["DEFMDISPEL"] = true,
-	["UTILITY"]    = true,
-	["PERSONAL"]   = true,
-	["IMMUNITY"]   = true,
-	["DAMAGE"]     = true,
-	["TANK"]       = true,
-}
-
--- Option #2: Blacklist for spells according to their IDs
---    e.g., ZT.blacklist = {51490, 132469}
-ZT.blacklist = {}
-
---------------------------------------------------------------------------------
--- END CONFIGURATION
---------------------------------------------------------------------------------
-
--- Turns on/off debugging messages
-ZT.DEBUG_EVENTS = false
-ZT.DEBUG_MESSAGES = false
-ZT.DEBUG_TRACKING = false
+ZT.inspectLib = LibStub:GetLibrary("LibGroupInSpecT-1.1", true);
 
 -- Class/Spec ID List
 local DK = { ID = 6, name = "DEATHKNIGHT", Blood = 250, Frost = 251, Unholy = 252 }
@@ -453,62 +420,65 @@ ZT.linkedSpellIDs = {
 }
 
 -- Building a complete list of tracked spells
-ZT.spellIDToInfo = {}
+function ZT:BuildSpellList()
+	self.spellIDToInfo = {}
 
-for type,spells in pairs(ZT.typeToTrackedSpells) do
-	for _,spellInfo in ipairs(spells) do
-		spellInfo.type = type
+	for type,spells in pairs(self.typeToTrackedSpells) do
+		for _,spellInfo in ipairs(spells) do
+			spellInfo.type = type
 
-		-- Creating a lookup map from list of valid specs
-		if spellInfo.specs then
-			local specsMap = {}
-			for _,specID in ipairs(spellInfo.specs) do
-				specsMap[specID] = true
-			end
-			spellInfo.specs = specsMap
-		end
-
-		-- Placing single modifiers inside of a table (or creating an empty table if none)
-		if spellInfo.mods then
-			if spellInfo.mods.type then
-				spellInfo.mods = { spellInfo.mods }
-			end
-		else
-			spellInfo.mods = {}
-		end
-
-		-- Placing single talent modifiers inside of a table (or creating an empty table if none)
-		if spellInfo.modTalents then
-			for talent,modifiers in pairs(spellInfo.modTalents) do
-				if modifiers.type then
-					spellInfo.modTalents[talent] = { modifiers }
+			-- Creating a lookup map from list of valid specs
+			if spellInfo.specs then
+				local specsMap = {}
+				for _,specID in ipairs(spellInfo.specs) do
+					specsMap[specID] = true
 				end
+				spellInfo.specs = specsMap
 			end
-		else
-			spellInfo.modTalents = {}
-		end
 
-		local spellID = spellInfo.spellID
-		local allSpellInfo = ZT.spellIDToInfo[spellID]
-		if not allSpellInfo then
-			allSpellInfo = {
-				type = type,
-				variants = { spellInfo },
-			}
-			ZT.spellIDToInfo[spellID] = allSpellInfo
-		else
-			local variants = allSpellInfo.variants
-			variants[#variants+1] = spellInfo
+			-- Placing single modifiers inside of a table (or creating an empty table if none)
+			if spellInfo.mods then
+				if spellInfo.mods.type then
+					spellInfo.mods = { spellInfo.mods }
+				end
+			else
+				spellInfo.mods = {}
+			end
+
+			-- Placing single talent modifiers inside of a table (or creating an empty table if none)
+			if spellInfo.modTalents then
+				for talent,modifiers in pairs(spellInfo.modTalents) do
+					if modifiers.type then
+						spellInfo.modTalents[talent] = { modifiers }
+					end
+				end
+			else
+				spellInfo.modTalents = {}
+			end
+
+			local spellID = spellInfo.spellID
+			local allSpellInfo = ZT.spellIDToInfo[spellID]
+			if not allSpellInfo then
+				allSpellInfo = {
+					type = type,
+					variants = { spellInfo },
+				}
+				self.spellIDToInfo[spellID] = allSpellInfo
+			else
+				local variants = allSpellInfo.variants
+				variants[#variants+1] = spellInfo
+			end
+		end
+	end
+
+	for _,spellID in ipairs(self.db.blacklist) do
+		local allSpellInfo = self.spellIDToInfo[spellID]
+		if allSpellInfo then
+			allSpellInfo.isBlacklisted = true
 		end
 	end
 end
 
-for _,spellID in ipairs(ZT.blacklist) do
-	local allSpellInfo = ZT.spellIDToInfo[spellID]
-	if allSpellInfo then
-		allSpellInfo.isBlacklisted = true
-	end
-end
 
 --------------------------------------------------------------------------------
 -- END TRACKED SPELLS
@@ -516,7 +486,7 @@ end
 
 -- Handling the sending of events to the front-end WAs
 local function sendFrontEndTrigger(watchInfo)
-	if ZT.DEBUG_EVENTS then
+	if ZT.db.debugEvents then
 		print("[ZT] Sending ZT_TRIGGER", watchInfo.spellInfo.type, watchInfo.watchID, watchInfo.duration, watchInfo.expiration)
 	end
 	WeakAuras.ScanEvents("ZT_TRIGGER", watchInfo.spellInfo.type, watchInfo.watchID, watchInfo.duration, watchInfo.expiration)
@@ -525,7 +495,7 @@ end
 local function sendFrontEndAdd(watchInfo)
 	local spellInfo = watchInfo.spellInfo
 
-	if ZT.DEBUG_EVENTS then
+	if ZT.db.debugEvents then
 		print("[ZT] Sending ZT_ADD", spellInfo.type, watchInfo.watchID, watchInfo.member.name, spellInfo.spellID)
 	end
 	WeakAuras.ScanEvents("ZT_ADD", spellInfo.type, watchInfo.watchID, watchInfo.member, spellInfo.spellID)
@@ -536,7 +506,7 @@ local function sendFrontEndAdd(watchInfo)
 end
 
 local function sendFrontEndRemove(watchInfo)
-	if ZT.DEBUG_EVENTS then
+	if ZT.db.debugEvents then
 		print("[ZT] Sending ZT_REMOVE", watchInfo.spellInfo.type, watchInfo.watchID)
 	end
 	WeakAuras.ScanEvents("ZT_REMOVE", watchInfo.spellInfo.type, watchInfo.watchID)
@@ -864,7 +834,7 @@ function ZT:registerFrontEnd(type, frontendID)
 		local typeWasRegistered = self:isTypeRegistered(type)
 		self.registration[type][frontendID] = true
 
-		if self.DEBUG_EVENTS then
+		if self.db.debugEvents then
 			print("[ZT] Received ZT_REGISTER", type, frontendID, " -> New", typeWasRegistered and "(Type Registered)" or "(Type Unregistered)")
 		end
 
@@ -872,7 +842,7 @@ function ZT:registerFrontEnd(type, frontendID)
 			self:rebroadcast(type)
 		else
 			for _,member in pairs(self.members) do
-				if (not member.isPlayer) or (self.showMine[type]) then
+				if (not member.isPlayer) or (self.db.showMine[type]) then
 					for _,allSpellInfo in pairs(self.spellIDToInfo) do
 						if (not allSpellInfo.isBlacklisted) and (type == allSpellInfo.type) then
 							for _,spellInfo in pairs(allSpellInfo.variants) do
@@ -887,7 +857,7 @@ function ZT:registerFrontEnd(type, frontendID)
 			end
 		end
 	else
-		if self.DEBUG_EVENTS then
+		if self.db.debugEvents then
 			print("[ZT] Received ZT_REGISTER", type, frontendID, " -> Existing")
 		end
 
@@ -899,7 +869,7 @@ function ZT:unregisterFrontEnd(type, frontendID)
 	self.registration[type][frontendID] = nil
 
 	if not self:isTypeRegistered(type) then
-		if self.DEBUG_EVENTS then
+		if self.db.debugEvents then
 			print("[ZT] Received ZT_UNREGISTER", type)
 		end
 
@@ -992,7 +962,7 @@ function ZT:addOrUpdateMember(memberInfo)
 	if not member.isReady then
 		local _,className,_,race,_,name = GetPlayerInfoByGUID(member.GUID)
 		member.name = name and gsub(name, "%-[^|]+", "") or nil
-		if self.DEBUG_TRACKING and (member.tracking == "Sharing") and member.name then
+		if self.db.debugTracking and (member.tracking == "Sharing") and member.name then
 			print(member.name, "is using ZenTracker")
 		end
 		member.class = className and AllClasses[className] or nil
@@ -1030,7 +1000,7 @@ function ZT:addOrUpdateMember(memberInfo)
 				for _,spellInfo in ipairs(allSpellInfo.variants) do
 					hasSpell = member:checkSpellRequirements(spellInfo, specInfo)
 					if hasSpell then
-						local isHidden = (not isRegistered) or (not self.showMine[allSpellInfo.type]) or isBlacklisted
+						local isHidden = (not isRegistered) or (not self.db.showMine[allSpellInfo.type]) or isBlacklisted
 						self:watch(spellInfo, member, specInfo, isHidden)
 						break
 					end
@@ -1057,7 +1027,7 @@ function ZT:addOrUpdateMember(memberInfo)
 	-- If tracking changed from "CombatLog" to "Sharing", remove event handlers and send a handshake/updates
 	if (member.tracking == "CombatLog") and (memberInfo.tracking == "Sharing") then
 		member.tracking = "Sharing"
-		if self.DEBUG_TRACKING and member.name then
+		if self.db.debugTracking and member.name then
 			print(member.name, "is using ZenTracker")
 		end
 
@@ -1093,7 +1063,7 @@ local function sendMessage(message)
 	local channel = IsInGroup(2) and "INSTANCE_CHAT" or "RAID"
 	C_ChatInfo.SendAddonMessage("ZenTracker", message, channel)
 
-	if ZT.DEBUG_MESSAGES then
+	if ZT.db.debugMessages then
 		print("[ZT] Sending Message '"..message.."'")
 	end
 end
@@ -1211,7 +1181,7 @@ function ZT:handleMessage(message)
 		return
 	end
 
-	if ZT.DEBUG_MESSAGES then
+	if ZT.db.debugMessages then
 		print("[ZT] Received Message '"..message.."'")
 	end
 
@@ -1222,10 +1192,6 @@ function ZT:handleMessage(message)
 	else
 		return
 	end
-end
-
-if not C_ChatInfo.RegisterAddonMessagePrefix("ZenTracker") then
-	print("[ZT] Error: Could not register addon message prefix. Defaulting to local-only cooldown tracking.")
 end
 
 -- Callback functions for libGroupInspecT for updating/removing members
@@ -1274,20 +1240,21 @@ function ZT:libInspectRemove(event, GUID)
 	self.members[GUID] = nil
 end
 
-ZT.inspectLib = LibStub:GetLibrary("LibGroupInSpecT-1.1", true)
+function ZT:Init()
+	self:BuildSpellList();
 
-if ZT.inspectLib then
-	WeakAurasSaved["ZenTracker_AuraEnv"] = nil -- Flushing out past garbage :)
-
-	if _G["ZenTracker_AuraEnv"] then
-		ZT.inspectLib.UnregisterAllCallbacks(_G["ZenTracker_AuraEnv"])
+	if not C_ChatInfo.RegisterAddonMessagePrefix("ZenTracker") then
+		print("[ZT] Error: Could not register addon message prefix. Defaulting to local-only cooldown tracking.")
 	end
-	_G["ZenTracker_AuraEnv"] = ZT
 
-	ZT.inspectLib.RegisterCallback(ZT, "GroupInSpecT_Update", "libInspectUpdate")
-	ZT.inspectLib.RegisterCallback(ZT, "GroupInSpecT_Remove", "libInspectRemove")
-	ZT.inspectLib:Rescan()
-else
-	print("[ZT] Error: LibGroupInSpecT-1.1 not found")
+	if self.inspectLib then
+		self.inspectLib.RegisterCallback(self, "GroupInSpecT_Update", "libInspectUpdate")
+		self.inspectLib.RegisterCallback(self, "GroupInSpecT_Remove", "libInspectRemove")
+		self.inspectLib:Rescan()
+	else
+		print("[ZT] Error: LibGroupInSpecT-1.1 not found")
+	end
 end
+
+
 

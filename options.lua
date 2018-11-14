@@ -1,5 +1,6 @@
 local _, ZT = ...;
 
+--- @type StdUi
 local StdUi = LibStub('StdUi');
 
 local defaults = {
@@ -25,6 +26,138 @@ local defaults = {
 	debugMessages = false,
 	debugTracking = false,
 };
+
+local spellValidator = function(self)
+	local text = self:GetText();
+	text = text:trim();
+	local name, rank, icon, _, _, _, spellId = GetSpellInfo(text);
+
+	if not name then
+		StdUi:MarkAsValid(self, false);
+		return false;
+	end
+
+	self:SetText(name);
+	self.value = spellId;
+	self.icon:SetTexture(icon);
+
+	StdUi:MarkAsValid(self, true);
+	return true;
+end
+
+StdUi:RegisterWidget('SpellBox', function(stdUi, parent, width, height)
+	local editBox = stdUi:EditBox(parent, width, height, '', spellValidator);
+	editBox:SetTextInsets(23, 3, 3, 3);
+
+	local iconFrame = stdUi:Panel(editBox, 16, 16);
+	stdUi:GlueLeft(iconFrame, editBox, 2, 0, true);
+
+	local icon = stdUi:Texture(iconFrame, 16, 16, 134400);
+	icon:SetAllPoints();
+
+	editBox.icon = icon;
+
+	iconFrame:SetScript('OnEnter', function ()
+		if editBox.value then
+			GameTooltip:SetOwner(editBox);
+			GameTooltip:SetSpellByID(editBox.value)
+			GameTooltip:Show();
+		end
+	end)
+
+	iconFrame:SetScript('OnLeave', function ()
+		if editBox.value then
+			GameTooltip:Hide();
+		end
+	end)
+
+	return editBox;
+end);
+
+StdUi:RegisterWidget('SpellInfo', function(stdUi, parent, width, height)
+	local frame = stdUi:Panel(parent, width, height);
+
+	local iconFrame = stdUi:Panel(frame, 16, 16);
+	stdUi:GlueLeft(iconFrame, frame, 2, 0, true);
+
+	local icon = stdUi:Texture(iconFrame, 16, 16);
+	icon:SetAllPoints();
+
+	local btn = stdUi:SquareButton(frame, 16, 16, 'DELETE');
+	StdUi:GlueRight(btn, frame, -3, 0, true);
+
+	local text = stdUi:Label(frame);
+	text:SetPoint('LEFT', icon, 'RIGHT', 3, 0);
+	text:SetPoint('RIGHT', btn, 'RIGHT', -3, 0);
+
+	frame.removeBtn = btn;
+	frame.icon = icon;
+	frame.text = text;
+
+	btn.parent = frame;
+
+	iconFrame:SetScript('OnEnter', function()
+		GameTooltip:SetOwner(frame);
+		GameTooltip:SetSpellByID(frame.spellId);
+		GameTooltip:Show();
+	end)
+
+	iconFrame:SetScript('OnLeave', function()
+		GameTooltip:Hide();
+	end)
+
+	function frame:SetSpell(nameOrId)
+		local name, rank, i, _, _, _, spellId = GetSpellInfo(nameOrId);
+		self.spellId = spellId;
+		self.spellName = name;
+
+		self.icon:SetTexture(i);
+		self.text:SetText(name);
+	end
+
+	return frame;
+end);
+
+local function update(parent, spellInfo, data)
+	spellInfo:SetSpell(data);
+	StdUi:SetObjSize(spellInfo, nil, 20);
+	spellInfo:SetPoint('RIGHT');
+	spellInfo:SetPoint('LEFT');
+
+	if not spellInfo.removeBtn.hasOnClick then
+		spellInfo.removeBtn:SetScript('OnClick', function(self)
+			local spellId = self.parent.spellId;
+			local spellList = parent:GetParent():GetParent();
+
+			for k, v in pairs(spellList.data) do
+				if v == spellId then
+					tremove(spellList.data, k);
+					break
+				end
+			end
+
+			spellList:RefreshList();
+		end);
+
+		spellInfo.removeBtn.hasOnClick = true;
+	end
+
+	return spellInfo;
+end
+
+StdUi:RegisterWidget('SpellList', function(stdUi, parent, width, height, data)
+	local spellList = StdUi:ScrollFrame(parent, 200, 400);
+	spellList.frameList = {};
+	spellList.data = data;
+
+	function spellList:RefreshList()
+		StdUi:ObjectList(spellList.scrollChild, self.frameList, 'SpellInfo', update, self.data);
+	end
+
+	spellList:RefreshList();
+
+	return spellList;
+end);
 
 function ZT:RegisterOptions()
 	if not ZenTrackerDb or type(ZenTrackerDb) ~= 'table' then
@@ -57,8 +190,31 @@ function ZT:RegisterOptions()
 	if self.db.debugTracking then debugTracking:SetChecked(true); end
 	debugTracking.OnValueChanged = function(_, flag) self.db.debugTracking = flag; end
 
+	local addSpell = StdUi:SpellBox(optionsFrame, nil, 20);
+	local addSpellBtn = StdUi:Button(optionsFrame, nil, 20, '+');
+	local blacklistFrame = StdUi:SpellList(optionsFrame, 200, 400, self.db.blacklist);
+
+	addSpellBtn:SetScript('OnClick', function ()
+		local spellId = addSpell:GetValue();
+		if spellId then
+			if tContains(ZT.db.blacklist, spellId) then
+				print('Spell ' .. spellId .. ' is already on blacklist!');
+			else
+				tinsert(ZT.db.blacklist, spellId);
+				blacklistFrame:RefreshList();
+			end
+		else
+			print('Not valid spell/aura');
+		end
+	end);
 
 	optionsFrame:AddRow():AddElements(debugEvents, debugMessages, debugTracking, { column = 'even' });
+
+	local addSpellRow = optionsFrame:AddRow();
+	addSpellRow:AddElement(addSpell, { column = 5 });
+	addSpellRow:AddElement(addSpellBtn, { column = 1 });
+
+	optionsFrame:AddRow():AddElements(blacklistFrame, { column = 6 });
 
 	optionsFrame:SetScript('OnShow', function(of)
 		of:DoLayout();

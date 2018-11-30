@@ -15,22 +15,16 @@ function eventFrame:COMBAT_LOG_EVENT_UNFILTERED(event, ...)
 	ZT:handleEvent(eventType, spellID, sourceGUID)
 end
 
+function eventFrame:ENCOUNTER_START(event)
+	ZT:startEncounter(event);
+end
+eventFrame.CHALLENGE_MODE_START = eventFrame.ENCOUNTER_START;
+
 function eventFrame:ENCOUNTER_END(event, id)
-	local _, instanceType = IsInInstance()
-	if instanceType ~= "raid" then
-		return
-	end
-
-	ZT:resetWatched(function(w)
-		return w.duration >= 180
-	end)
+	ZT:startEncounter(event);
 end
-
-function eventFrame:CHALLENGE_MODE_START()
-	ZT:resetWatched(function(w)
-		return w.duration >= 180
-	end)
-end
+eventFrame.CHALLENGE_MODE_COMPLETED = eventFrame.ENCOUNTER_END;
+eventFrame.PLAYER_ENTERING_WORLD = eventFrame.ENCOUNTER_END;
 
 function eventFrame:CHAT_MSG_ADDON(event, prefix, message, type, sender)
 	if prefix == "ZenTracker" then
@@ -52,6 +46,9 @@ function eventFrame:ADDON_LOADED(event, addon)
 
 	eventFrame:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED');
 	eventFrame:RegisterEvent('CHALLENGE_MODE_START');
+	eventFrame:RegisterEvent('CHALLENGE_MODE_COMPLETED');
+	eventFrame:RegisterEvent('PLAYER_ENTERING_WORLD');
+	eventFrame:RegisterEvent('ENCOUNTER_START');
 	eventFrame:RegisterEvent('ENCOUNTER_END');
 	eventFrame:RegisterEvent('CHAT_MSG_ADDON');
 	eventFrame:RegisterEvent('GROUP_JOINED');

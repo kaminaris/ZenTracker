@@ -23,6 +23,18 @@ local AllClasses = {
 	[Warlock.name] = Warlock, [Warrior.name] = Warrior
 }
 
+-- Local versions of commonly used functions
+local ipairs = ipairs
+local pairs = pairs
+local print = print
+local select = select
+local tonumber = tonumber
+
+local IsInGroup = IsInGroup
+local IsInRaid = IsInRaid
+local UnitGUID = UnitGUID
+local C_ChatInfo_SendAddonMessage = C_ChatInfo.SendAddonMessage
+
 --------------------------------------------------------------------------------
 -- BEGIN SPELL COOLDOWN MODIFIERS
 --------------------------------------------------------------------------------
@@ -129,7 +141,6 @@ local modGuardianSpirit = DynamicMod({
 		end
 	}
 })
-
 
 -- Dispels: Go on cooldown only if a debuff is dispelled
 local function DispelMod(spellID)
@@ -419,6 +430,21 @@ ZT.linkedSpellIDs = {
 	[191427] = {200166} -- Metamorphosis
 }
 
+ZT.specialConfigSpellIDs = {
+	[202719] = "ArcaneTorrent",
+	[50613]  = "ArcaneTorrent",
+	[80483]  = "ArcaneTorrent",
+	[28730]  = "ArcaneTorrent",
+	[129597] = "ArcaneTorrent",
+	[155145] = "ArcaneTorrent",
+	[232633] = "ArcaneTorrent",
+	[25046]  = "ArcaneTorrent",
+	[28730]  = "ArcaneTorrent",
+	[69179]  = "ArcaneTorrent",
+	[221562] = "Asphyxiate",
+	[108194] = "Asphyxiate",
+}
+
 -- Building a complete list of tracked spells
 function ZT:BuildSpellList()
 	self.spellIDToInfo = {}
@@ -457,11 +483,21 @@ function ZT:BuildSpellList()
 			end
 
 			local spellID = spellInfo.spellID
-			local allSpellInfo = ZT.spellIDToInfo[spellID]
+			local allSpellInfo = self.spellIDToInfo[spellID]
 			if not allSpellInfo then
+				-- Checking if this spellID is blacklisted
+				local isBlacklisted = self.db.blacklist[spellID]
+				if isBlacklisted == nil then
+					--isBlacklisted = self.db.config["spell"..ZT.specialConfigSpellIDs[spellID]]
+				end
+				if self.db.spellConfigType == 2 then
+					isBlacklisted = not isBlacklisted
+				end
+
 				allSpellInfo = {
 					type = type,
 					variants = { spellInfo },
+					isBlacklisted = isBlacklisted,
 				}
 				self.spellIDToInfo[spellID] = allSpellInfo
 			else
@@ -470,15 +506,7 @@ function ZT:BuildSpellList()
 			end
 		end
 	end
-
-	for _,spellID in ipairs(self.db.blacklist) do
-		local allSpellInfo = self.spellIDToInfo[spellID]
-		if allSpellInfo then
-			allSpellInfo.isBlacklisted = true
-		end
-	end
 end
-
 
 --------------------------------------------------------------------------------
 -- END TRACKED SPELLS
@@ -486,6 +514,10 @@ end
 
 -- Handling the sending of events to the front-end WAs
 local function sendFrontEndTrigger(watchInfo)
+	if watchInfo.isHidden then
+		return
+	end
+
 	if ZT.db.debugEvents then
 		print("[ZT] Sending ZT_TRIGGER", watchInfo.spellInfo.type, watchInfo.watchID, watchInfo.duration, watchInfo.expiration)
 	end
@@ -493,6 +525,9 @@ local function sendFrontEndTrigger(watchInfo)
 end
 
 local function sendFrontEndAdd(watchInfo)
+	if watchInfo.isHidden then
+		return
+	end
 	local spellInfo = watchInfo.spellInfo
 
 	if ZT.db.debugEvents then
@@ -506,6 +541,9 @@ local function sendFrontEndAdd(watchInfo)
 end
 
 local function sendFrontEndRemove(watchInfo)
+	if watchInfo.isHidden then
+		return
+	end
 	if ZT.db.debugEvents then
 		print("[ZT] Sending ZT_REMOVE", watchInfo.spellInfo.type, watchInfo.watchID)
 	end
@@ -620,7 +658,7 @@ local function WatchInfo_updateRemaining(self, remaining)
 	sendFrontEndTrigger(self)
 end
 
-local function WatchInfo_update(self, ignoreIfReady)
+local function WatchInfo_update(self, ignoreIfReady, ignoreRateLimit)
 	local startTime, duration, enabled = GetSpellCooldown(self.spellInfo.spellID)
 	if enabled ~= 0 then
 		if startTime ~= 0 then
@@ -631,12 +669,34 @@ local function WatchInfo_update(self, ignoreIfReady)
 		end
 
 		if (not ignoreIfReady) or (startTime ~= 0) then
-			if not self.isHidden then
-				sendFrontEndTrigger(self)
-			end
-			ZT:sendCDUpdate(self)
+			sendFrontEndTrigger(self)
+			ZT:sendCDUpdate(self, ignoreRateLimit)
 		end
 	end
+end
+
+local function WatchInfo_handleStarted(self)
+	WatchInfo_update(self, false, true)
+end
+
+local function WatchInfo_handleChanged(self)
+	WatchInfo_update(self, false, false)
+end
+
+local function WatchInfo_handleReady(self)
+	self.expiration = GetTime()
+	sendFrontEndTrigger(self)
+	ZT:sendCDUpdate(self, true)
+end
+
+local function WatchInfo_hide(self)
+	sendFrontEndRemove(self)
+	self.isHidden = true
+end
+
+local function WatchInfo_unhide(self)
+	self.isHidden = false
+	sendFrontEndAdd(self)
 end
 
 function ZT:togglePlayerHandlers(watchInfo, enable)
@@ -646,21 +706,9 @@ function ZT:togglePlayerHandlers(watchInfo, enable)
 	if enable then
 		WeakAuras.WatchSpellCooldown(spellID)
 	end
-	toggleEventHandler(self, "SPELL_COOLDOWN_STARTED", spellID, 0, WatchInfo_update, watchInfo)
-	toggleEventHandler(self, "SPELL_COOLDOWN_CHANGED", spellID, 0, WatchInfo_update, watchInfo)
-	toggleEventHandler(self, "SPELL_COOLDOWN_READY", spellID, 0, WatchInfo_update, watchInfo)
-
-	local links = self.linkedSpellIDs[spellID]
-	if links then
-		for _,linkedSpellID in ipairs(links) do
-			if enable then
-				WeakAuras.WatchSpellCooldown(linkedSpellID)
-			end
-			toggleEventHandler(self, "SPELL_COOLDOWN_STARTED", linkedSpellID, 0, WatchInfo_update, watchInfo)
-			toggleEventHandler(self, "SPELL_COOLDOWN_CHANGED", linkedSpellID, 0, WatchInfo_update, watchInfo)
-			toggleEventHandler(self, "SPELL_COOLDOWN_READY", linkedSpellID, 0, WatchInfo_update, watchInfo)
-		end
-	end
+	toggleEventHandler(self, "SPELL_COOLDOWN_STARTED", spellID, 0, WatchInfo_handleStarted, watchInfo)
+	toggleEventHandler(self, "SPELL_COOLDOWN_CHANGED", spellID, 0, WatchInfo_handleChanged, watchInfo)
+	toggleEventHandler(self, "SPELL_COOLDOWN_READY", spellID, 0, WatchInfo_handleReady, watchInfo)
 end
 
 function ZT:toggleCombatLogHandlers(watchInfo, enable, specInfo)
@@ -693,7 +741,6 @@ function ZT:toggleCombatLogHandlers(watchInfo, enable, specInfo)
 			for _, modifier in pairs(modifiers) do
 				if modifier.type == "Dynamic" then
 					for _,handlerInfo in ipairs(modifier.handlers) do
-						print(spellID, handlerInfo.type, handlerInfo.spellID)
 						toggleEventHandler(self, handlerInfo.type, handlerInfo.spellID, member.GUID, handlerInfo.handler, watchInfo)
 					end
 				end
@@ -733,23 +780,18 @@ function ZT:watch(spellInfo, member, specInfo, isHidden)
 		spells[member.GUID] = watchInfo
 		member.watching[spellID] = watchInfo
 
-		if not isHidden then
-			sendFrontEndAdd(watchInfo)
-		end
-		if member.isPlayer then
-			watchInfo:update(true)
-		end
+		sendFrontEndAdd(watchInfo)
 	else
 		watchInfo.spellInfo = spellInfo
 		watchInfo.duration = member:computeCooldown(spellInfo, specInfo)
 
 		if watchInfo.isHidden and not isHidden then
-			watchInfo.isHidden = false
-			sendFrontEndAdd(watchInfo)
+			WatchInfo_unhide(watchInfo)
 		end
-		if member.isPlayer then
-			watchInfo:update(true)
-		end
+	end
+
+	if member.isPlayer then
+		watchInfo:update(true)
 	end
 
 	if member.isPlayer then
@@ -777,8 +819,7 @@ function ZT:unwatch(spellInfo, member, specInfo, keepHidden)
 	if watchInfo then
 		if member.isPlayer then
 			if keepHidden then
-				watchInfo.isHidden = true
-				sendFrontEndRemove(watchInfo)
+				WatchInfo_hide(watchInfo)
 				return
 			end
 
@@ -790,19 +831,7 @@ function ZT:unwatch(spellInfo, member, specInfo, keepHidden)
 		self.watching[spellInfo.spellID][member.GUID] = nil
 		member.watching[spellID] = nil
 
-		if not watchInfo.isHidden then
-			sendFrontEndRemove(watchInfo)
-		end
-	end
-end
-
-function ZT:resetWatched(evalFunc)
-	for _,sources in pairs(self.watching) do
-		for _,watchInfo in pairs(sources) do
-			if evalFunc(watchInfo) then
-				watchInfo:updateRemaining(0)
-			end
-		end
+		sendFrontEndRemove(watchInfo)
 	end
 end
 
@@ -816,7 +845,7 @@ end
 function ZT:rebroadcast(type)
 	for _,sources in pairs(self.watching) do
 		for _,watchInfo in pairs(sources) do
-			if (watchInfo.spellInfo.type == type) and (not watchInfo.isHidden) then
+			if (watchInfo.spellInfo.type == type) then
 				sendFrontEndAdd(watchInfo)
 			end
 		end
@@ -847,7 +876,7 @@ function ZT:registerFrontEnd(type, frontendID)
 						if (not allSpellInfo.isBlacklisted) and (type == allSpellInfo.type) then
 							for _,spellInfo in pairs(allSpellInfo.variants) do
 								if member:checkSpellRequirements(spellInfo) then
-									self:watch(spellInfo, member, member.specInfo)
+									self:watch(spellInfo, member, member.specInfo, member.isHidden)
 									break
 								end
 							end
@@ -886,6 +915,7 @@ end
 
 -- Utility functions for operating over all spells available for a group member
 ZT.members = {}
+ZT.inEncounter = false
 
 local function Member_checkSpellRequirements(self, spellInfo, specInfo)
 	if not specInfo then
@@ -944,14 +974,33 @@ local function Member_computeCooldown(self, spellInfo, specInfo)
 	return cooldown
 end
 
+local function Member_hide(self)
+	if not self.isHidden and not self.isPlayer then
+		self.isHidden = true
+		for _,watchInfo in pairs(self.watching) do
+			WatchInfo_hide(watchInfo)
+		end
+	end
+end
+
+local function Member_unhide(self)
+	if self.isHidden and not self.isPlayer then
+		self.isHidden = false
+		for _,watchInfo in pairs(self.watching) do
+			WatchInfo_unhide(watchInfo)
+		end
+	end
+end
+
 function ZT:addOrUpdateMember(memberInfo)
 	local member = self.members[memberInfo.GUID]
 	if not member then
 		member = memberInfo
 		member.watching = {}
 		member.tracking = member.tracking and member.tracking or "CombatLog"
-		member.isReady = false
 		member.isPlayer = (member.GUID == UnitGUID("player"))
+		member.isHidden = (not member.isPlayer and self.inEncounter)
+		member.isReady = false
 		member.checkSpellRequirements = Member_checkSpellRequirements
 		member.computeCooldown = Member_computeCooldown
 		self.members[memberInfo.GUID] = member
@@ -1009,7 +1058,7 @@ function ZT:addOrUpdateMember(memberInfo)
 				for _,spellInfo in ipairs(allSpellInfo.variants) do
 					hasSpell = member:checkSpellRequirements(spellInfo, specInfo)
 					if hasSpell then
-						self:watch(spellInfo, member, specInfo)
+						self:watch(spellInfo, member, specInfo, member.isHidden)
 						break
 					end
 				end
@@ -1043,6 +1092,53 @@ function ZT:addOrUpdateMember(memberInfo)
 	end
 end
 
+function ZT:resetEncounterCDs()
+	for _,member in pairs(self.members) do
+		if not member.isPlayer and member.tracking ~= "Sharing" then
+			for _,watchInfo in pairs(member.watching) do
+				if watchInfo.duration >= 180 then
+					WatchInfo_updateRemaining(watchInfo, 0)
+				end
+			end
+		end
+	end
+end
+
+function ZT:startEncounter(event)
+	-- Note: This shouldn't happen, but in case it does...
+	if self.inEncounter then
+		for _,member in pairs(self.members) do
+			Member_unhide(member)
+		end
+	end
+
+	self.inEncounter = true
+	local _,_,_,instanceID = UnitPosition("player")
+	for _,member in pairs(self.members) do
+		local _,_,_,mInstanceID = UnitPosition(self.inspectLib:GuidToUnit(member.GUID))
+		if mInstanceID ~= instanceID then
+			Member_hide(member)
+		end
+	end
+
+	if event == "CHALLENGE_MODE_START" then
+		self:resetEncounterCDs()
+	end
+end
+
+function ZT:endEncounter(event)
+	if self.inEncounter then
+		self.inEncounter = false
+		for _,member in pairs(self.members) do
+			Member_unhide(member)
+		end
+	end
+
+	if event == "ENCOUNTER_END" then
+		self:resetEncounterCDs()
+	end
+end
+
 -- Message Format = <Protocol Version (%d)>:<Message Type (%s)>:<Member GUID (%s)>...
 --   Type = "H" (Handshake)
 --     ...:<Spec ID (%d)>:<Talents (%s)>
@@ -1060,12 +1156,16 @@ ZT.timeOfLastCDUpdate = {}
 ZT.queuedCDUpdates = {}
 
 local function sendMessage(message)
-	local channel = IsInGroup(2) and "INSTANCE_CHAT" or "RAID"
-	C_ChatInfo.SendAddonMessage("ZenTracker", message, channel)
+	if not IsInGroup() and not IsInRaid() then
+		return
+	end
 
-	if ZT.db.debugMessages then
+	if ZT.DEBUG_MESSAGES then
 		print("[ZT] Sending Message '"..message.."'")
 	end
+
+	local channel = IsInGroup(2) and "INSTANCE_CHAT" or "RAID"
+	C_ChatInfo_SendAddonMessage("ZenTracker", message, channel)
 end
 
 function ZT:sendHandshake(specInfo)
@@ -1090,22 +1190,34 @@ function ZT:sendHandshake(specInfo)
 	self.queuedHandshake = false
 end
 
-function ZT:sendCDUpdate(watchInfo)
-	local time = GetTime()
+function ZT:sendCDUpdate(watchInfo, ignoreRateLimit, wasQueued)
 	local spellID = watchInfo.spellInfo.spellID
+	local time = GetTime()
 	local remaining = watchInfo.expiration - time
 	if remaining < 0 then
 		remaining = 0
 	end
 
-	if self.timeOfLastCDUpdate[spellID] and remaining ~= 0 then
-		local timeSinceLastCDUpdate = (time - self.timeOfLastCDUpdate[spellID])
-		if timeSinceLastCDUpdate < self.timeBetweenCDUpdates then
-			if not self.queuedCDUpdates[spellID] then
-				self.queuedCDUpdates[spellID] = true
-				C_Timer.After(self.timeBetweenCDUpdates - timeSinceLastCDUpdate, function() self:sendCDUpdate(watchInfo) end)
+	if not ignoreRateLimit then
+		local isQueued = self.queuedCDUpdates[spellID]
+		if wasQueued then
+			if not isQueued then
+				return -- Ignore since an update occured while this update was queued
 			end
-			return
+		else
+			if isQueued then
+				return -- Ignore since an update is already queued
+			else
+				local timeOfLastCDUpdate = self.timeOfLastCDUpdate[spellID]
+				if timeOfLastCDUpdate then
+					local timeSinceLastCDUpdate = (time - self.timeOfLastCDUpdate[spellID])
+					if timeSinceLastCDUpdate < self.timeBetweenCDUpdates then
+						self.queuedCDUpdates[spellID] = true
+						C_Timer.After(self.timeBetweenCDUpdates - timeSinceLastCDUpdate, function() self:sendCDUpdate(watchInfo, false, true) end)
+						return -- Ignore since an update has now been queued
+					end
+				end
+			end
 		end
 	end
 
@@ -1149,7 +1261,7 @@ end
 
 function ZT:handleCDUpdate(mGUID, spellID, duration, remaining)
 	local member = self.members[mGUID]
-	if not member then
+	if not member or not member.isReady then
 		return
 	end
 
@@ -1165,6 +1277,14 @@ function ZT:handleCDUpdate(mGUID, spellID, duration, remaining)
 		local watchInfo = sources[member.GUID]
 		if not watchInfo then
 			return
+		end
+
+		if member.tracking == "CombatLog" then
+			member.tracking = "Sharing"
+			if self.db.debugTracking then
+				print(member.name, "is using ZenTracker")
+			end
+			self:removeAllEventHandlers(member.GUID)
 		end
 
 		watchInfo.duration = duration

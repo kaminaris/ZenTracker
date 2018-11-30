@@ -1,4 +1,6 @@
-local _, ZT = ...;
+local addonName, ZT = ...;
+
+_G[addonName] = ZT;
 
 ZT.inspectLib = LibStub:GetLibrary("LibGroupInSpecT-1.1", true);
 
@@ -32,6 +34,7 @@ local tonumber = tonumber
 
 local IsInGroup = IsInGroup
 local IsInRaid = IsInRaid
+local GetTime = GetTime
 local UnitGUID = UnitGUID
 local C_ChatInfo_SendAddonMessage = C_ChatInfo.SendAddonMessage
 
@@ -1360,6 +1363,22 @@ function ZT:libInspectRemove(event, GUID)
 	self.members[GUID] = nil
 end
 
+local IterateGroupMembers = function(reversed, forceParty)
+	local unit = (not forceParty and IsInRaid()) and 'raid' or 'party'
+	local numGroupMembers = unit == 'party' and GetNumSubgroupMembers() or GetNumGroupMembers()
+	local i = reversed and numGroupMembers or (unit == 'party' and 0 or 1)
+	return function()
+		local ret
+		if i == 0 and unit == 'party' then
+			ret = 'player'
+		elseif i <= numGroupMembers and i > 0 then
+			ret = unit .. i
+		end
+		i = i + (reversed and -1 or 1)
+		return ret
+	end
+end
+
 function ZT:Init()
 	self:BuildSpellList();
 
@@ -1367,12 +1386,17 @@ function ZT:Init()
 		print("[ZT] Error: Could not register addon message prefix. Defaulting to local-only cooldown tracking.")
 	end
 
-	if self.inspectLib then
-		self.inspectLib.RegisterCallback(self, "GroupInSpecT_Update", "libInspectUpdate")
-		self.inspectLib.RegisterCallback(self, "GroupInSpecT_Remove", "libInspectRemove")
-		self.inspectLib:Rescan()
-	else
-		print("[ZT] Error: LibGroupInSpecT-1.1 not found")
+	C_Timer.After(10, function () print('ZT init') end)
+	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Update", "libInspectUpdate")
+	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Remove", "libInspectRemove")
+	for unit in IterateGroupMembers() do
+		local GUID = UnitGUID(unit)
+		if GUID then
+			local info = self.inspectLib:GetCachedInfo(GUID)
+			if info then
+				self:libInspectUpdate("Init", GUID, unit, info)
+			end
+		end
 	end
 end
 

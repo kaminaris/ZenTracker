@@ -1,5 +1,9 @@
 local addonName, ZT = ...;
 
+local WeakAuras = WeakAuras;
+local CreateFrame = CreateFrame;
+local hooksecurefunc = hooksecurefunc;
+
 local eventFrame = CreateFrame('Frame');
 
 ZT.eventFrame = eventFrame;
@@ -36,6 +40,22 @@ function eventFrame:GROUP_JOINED()
 	ZT:sendHandshake()
 end
 
+function ZT.ScanEvents(...)
+	local event, type, frontendID = ...;
+
+	if event == 'ZT_REGISTER' then
+		ZT:registerFrontEnd(type, frontendID)
+	elseif event == 'ZT_UNREGISTER' then
+		ZT:unregisterFrontEnd(type, frontendID)
+	elseif
+		event == 'SPELL_COOLDOWN_STARTED' or
+		event == 'SPELL_COOLDOWN_READY' or
+		event == 'SPELL_COOLDOWN_CHANGED'
+	then
+		ZT:handleEvent(event, type, 0)
+	end
+end
+
 function eventFrame:ADDON_LOADED(event, addon)
 	if addon ~= addonName then
 		return;
@@ -52,28 +72,6 @@ function eventFrame:ADDON_LOADED(event, addon)
 	eventFrame:RegisterEvent('ENCOUNTER_END');
 	eventFrame:RegisterEvent('CHAT_MSG_ADDON');
 	eventFrame:RegisterEvent('GROUP_JOINED');
+
+	hooksecurefunc(WeakAuras, 'ScanEvents', ZT.ScanEvents);
 end
-
-local origScanEvents = WeakAuras.ScanEvents;
-function ZT.ScanEvents(...)
-	local event, type, frontendID = ...;
-
-	if event == 'ZT_REGISTER' then
-		ZT:registerFrontEnd(type, frontendID)
-	elseif event == 'ZT_UNREGISTER' then
-		ZT:unregisterFrontEnd(type, frontendID)
-	elseif event == 'SPELL_COOLDOWN_STARTED' then
-		ZT:handleEvent(event, type, 0)
-		return origScanEvents(...) -- pass thru
-	elseif event == 'SPELL_COOLDOWN_READY' then
-		ZT:handleEvent(event, type, 0)
-		return origScanEvents(...) -- pass thru
-	elseif event == 'SPELL_COOLDOWN_CHANGED' then
-		ZT:handleEvent(event, type, 0)
-		return origScanEvents(...) -- pass thru
-	else
-		return origScanEvents(...) -- pass thru
-	end
-end
-
-WeakAuras.ScanEvents = ZT.ScanEvents;

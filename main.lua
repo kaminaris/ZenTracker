@@ -1386,7 +1386,6 @@ function ZT:Init()
 		print("[ZT] Error: Could not register addon message prefix. Defaulting to local-only cooldown tracking.")
 	end
 
-	C_Timer.After(10, function () print('ZT init') end)
 	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Update", "libInspectUpdate")
 	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Remove", "libInspectRemove")
 	self.inspectLib:Rescan()

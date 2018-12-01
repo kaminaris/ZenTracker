@@ -1,5 +1,5 @@
 ## Title: ZenTracker
-## Version: 8.0.1
+## Version: 8.0.1.1
 ## Author: Zen, Kaminaris
 ## Interface: 80000
 ## X-Curse-Project-ID: 11

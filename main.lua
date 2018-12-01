@@ -1389,6 +1389,7 @@ function ZT:Init()
 	C_Timer.After(10, function () print('ZT init') end)
 	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Update", "libInspectUpdate")
 	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Remove", "libInspectRemove")
+	self.inspectLib:Rescan()
 	for unit in IterateGroupMembers() do
 		local GUID = UnitGUID(unit)
 		if GUID then

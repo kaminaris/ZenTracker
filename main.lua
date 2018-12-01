@@ -489,13 +489,10 @@ function ZT:BuildSpellList()
 			local allSpellInfo = self.spellIDToInfo[spellID]
 			if not allSpellInfo then
 				-- Checking if this spellID is blacklisted
-				local isBlacklisted = self.db.blacklist[spellID]
-				if isBlacklisted == nil then
-					--isBlacklisted = self.db.config["spell"..ZT.specialConfigSpellIDs[spellID]]
-				end
-				if self.db.spellConfigType == 2 then
-					isBlacklisted = not isBlacklisted
-				end
+				local spellName = GetSpellInfo(spellID);
+				spellName = spellName:gsub('%s+', '');
+
+				local isBlacklisted = self.db.blacklist[spellName];
 
 				allSpellInfo = {
 					type = type,
@@ -1388,7 +1385,7 @@ function ZT:Init()
 
 	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Update", "libInspectUpdate")
 	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Remove", "libInspectRemove")
-	--self.inspectLib:Rescan() -- Keep it here in case library fails
+	self.inspectLib:Rescan() -- Keep it here in case library fails
 	for unit in IterateGroupMembers() do
 		local GUID = UnitGUID(unit)
 		if GUID then

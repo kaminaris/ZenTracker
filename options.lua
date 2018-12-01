@@ -198,8 +198,48 @@ StdUi:RegisterWidget('SpellList', function(stdUi, parent, width, height, data)
 	return spellList;
 end);
 
-function ZT:BuildOptionsFrame()
+function ZT:BuildOptionsFrame(parent)
+	local column = 4;
 
+	local scrollFrame = StdUi:ScrollFrame(parent, parent:GetWidth(), 400);
+	local child = scrollFrame.scrollChild;
+
+	StdUi:EasyLayout(child);
+
+	local spellNames = {};
+	for type, spells in pairs(self.typeToTrackedSpells) do
+		child:AddRow():AddElement(StdUi:Label(child, type));
+
+		local row = child:AddRow();
+		local columnsTaken = 0;
+
+		for i, spell in ipairs(spells) do
+			local spellName = GetSpellInfo(spell.spellID);
+			spellName = spellName:gsub('%s+', '');
+
+			if not spellNames[spellName] then
+				if columnsTaken >= 12 then
+					row = child:AddRow();
+					columnsTaken = 0;
+				end
+
+				local option = StdUi:SpellCheckbox(child, nil, 20);
+				option:SetSpell(spell.spellID);
+
+				if self.db.blacklist[spellName] then option:SetChecked(true); end
+				option.OnValueChanged = function(scb, flag)
+					local shortName = scb.spellName:gsub('%s+', '');
+					self.db.blacklist[shortName] = flag and true or nil;
+				end
+
+				row:AddElement(option, { column = column });
+				columnsTaken = columnsTaken + column;
+				spellNames[spellName] = true;
+			end
+		end
+	end
+
+	return scrollFrame;
 end
 
 function ZT:RegisterOptions()
@@ -233,34 +273,20 @@ function ZT:RegisterOptions()
 	if self.db.debugTracking then debugTracking:SetChecked(true); end
 	debugTracking.OnValueChanged = function(_, flag) self.db.debugTracking = flag; end
 
-	local addSpell = StdUi:SpellBox(optionsFrame, nil, 20);
-	local addSpellBtn = StdUi:Button(optionsFrame, nil, 20, '+');
-	local blacklistFrame = StdUi:SpellList(optionsFrame, 200, 400, self.db.blacklist);
-
-	addSpellBtn:SetScript('OnClick', function ()
-		local spellId = addSpell:GetValue();
-		if spellId then
-			if tContains(ZT.db.blacklist, spellId) then
-				print('Spell ' .. spellId .. ' is already on blacklist!');
-			else
-				tinsert(ZT.db.blacklist, spellId);
-				blacklistFrame:RefreshList();
-			end
-		else
-			print('Not valid spell/aura');
-		end
-	end);
+	local scrollFrame = self:BuildOptionsFrame(optionsFrame);
 
 	optionsFrame:AddRow():AddElements(debugEvents, debugMessages, debugTracking, { column = 'even' });
 
-	local addSpellRow = optionsFrame:AddRow();
-	addSpellRow:AddElement(addSpell, { column = 5 });
-	addSpellRow:AddElement(addSpellBtn, { column = 1 });
+	optionsFrame:AddRow():AddElement(StdUi:Header(optionsFrame, 'Spell Blacklist'));
 
-	optionsFrame:AddRow():AddElements(blacklistFrame, { column = 6 });
+	optionsFrame:AddRow():AddElements(scrollFrame, { column = 12 });
 
 	optionsFrame:SetScript('OnShow', function(of)
-		of:DoLayout();
+		if not of.layoutDone then
+			of:DoLayout();
+			scrollFrame.scrollChild:DoLayout();
+			of.layoutDone = true;
+		end
 	end);
 
 	InterfaceOptions_AddCategory(self.optionsFrame);

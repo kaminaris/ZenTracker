@@ -25,7 +25,7 @@ end
 eventFrame.CHALLENGE_MODE_START = eventFrame.ENCOUNTER_START;
 
 function eventFrame:ENCOUNTER_END(event, id)
-	ZT:startEncounter(event);
+	ZT:endEncounter(event);
 end
 eventFrame.CHALLENGE_MODE_COMPLETED = eventFrame.ENCOUNTER_END;
 eventFrame.PLAYER_ENTERING_WORLD = eventFrame.ENCOUNTER_END;

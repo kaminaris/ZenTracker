@@ -1,0 +1,16 @@
+package-as: ZenTracker
+enable-nolib-creation: no
+
+externals:
+    # Ace Libs
+    Libs/CallbackHandler-1.0:
+        url: https://repos.wowace.com/wow/ace3/trunk/CallbackHandler-1.0
+    Libs/LibStub:
+        url: https://repos.wowace.com/wow/ace3/trunk/LibStub
+
+    Libs/StdUi:
+        url: https://github.com/kaminaris/StdUi.git
+
+ignore:
+    - README.md
+    - CHANGELOG.md

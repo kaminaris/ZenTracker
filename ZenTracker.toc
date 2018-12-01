@@ -2,10 +2,10 @@
 ## Version: 8.0.2
 ## Author: Zen, Kaminaris
 ## Interface: 80000
-## X-Curse-Project-ID: 11
-## X-WoWI-ID: 11
 ## Dependencies: WeakAuras
 ## SavedVariables: ZenTrackerDb
+## X-Curse-Project-ID: 308096
+## X-WoWI-ID: 24863
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua

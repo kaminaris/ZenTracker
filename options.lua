@@ -118,6 +118,45 @@ StdUi:RegisterWidget('SpellInfo', function(stdUi, parent, width, height)
 	return frame;
 end);
 
+StdUi:RegisterWidget('SpellCheckbox', function(stdUi, parent, width, height)
+	local checkbox = stdUi:Checkbox(parent, '', width, height);
+	checkbox.spellId = nil;
+	checkbox.spellName = '';
+
+	local iconFrame = stdUi:Panel(checkbox, 16, 16);
+	iconFrame:SetPoint('LEFT', checkbox.target, 'RIGHT', 5, 0);
+
+	local icon = stdUi:Texture(iconFrame, 16, 16);
+	icon:SetAllPoints();
+
+	checkbox.icon = icon;
+
+	checkbox.text:SetPoint('LEFT', iconFrame, 'RIGHT', 5, 0);
+
+	checkbox:SetScript('OnEnter', function()
+		if checkbox.spellId then
+			GameTooltip:SetOwner(checkbox);
+			GameTooltip:SetSpellByID(checkbox.spellId);
+			GameTooltip:Show();
+		end
+	end)
+
+	checkbox:SetScript('OnLeave', function()
+		GameTooltip:Hide();
+	end)
+
+	function checkbox:SetSpell(nameOrId)
+		local name, rank, i, _, _, _, spellId = GetSpellInfo(nameOrId);
+		self.spellId = spellId;
+		self.spellName = name;
+
+		self.icon:SetTexture(i);
+		self.text:SetText(name);
+	end
+
+	return checkbox;
+end);
+
 local function update(parent, spellInfo, data)
 	spellInfo:SetSpell(data);
 	StdUi:SetObjSize(spellInfo, nil, 20);
@@ -158,6 +197,10 @@ StdUi:RegisterWidget('SpellList', function(stdUi, parent, width, height, data)
 
 	return spellList;
 end);
+
+function ZT:BuildOptionsFrame()
+
+end
 
 function ZT:RegisterOptions()
 	if not ZenTrackerDb or type(ZenTrackerDb) ~= 'table' then

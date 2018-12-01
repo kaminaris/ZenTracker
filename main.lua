@@ -1388,7 +1388,7 @@ function ZT:Init()
 
 	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Update", "libInspectUpdate")
 	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Remove", "libInspectRemove")
-	self.inspectLib:Rescan()
+	--self.inspectLib:Rescan() -- Keep it here in case library fails
 	for unit in IterateGroupMembers() do
 		local GUID = UnitGUID(unit)
 		if GUID then

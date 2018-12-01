@@ -62,7 +62,7 @@
 --     Returns an array with the set of unit ids for the current group.
 --]]
 
-local MAJOR, MINOR = "LibGroupInSpecT-1.1", tonumber (("$Revision: 86 $"):match ("(%d+)") or 0)
+local MAJOR, MINOR = "LibGroupInSpecT-1.1", 90
 
 if not LibStub then error(MAJOR.." requires LibStub") end
 local lib = LibStub:NewLibrary (MAJOR, MINOR)
@@ -75,6 +75,7 @@ if not lib.events then error(MAJOR.." requires CallbackHandler") end
 local UPDATE_EVENT = "GroupInSpecT_Update"
 local REMOVE_EVENT = "GroupInSpecT_Remove"
 local INSPECT_READY_EVENT = "GroupInSpecT_InspectReady"
+local QUEUE_EVENT = "GroupInSpecT_QueueChanged"
 
 local COMMS_PREFIX = "LGIST11"
 local COMMS_FMT = "1"
@@ -86,10 +87,10 @@ local INSPECT_TIMEOUT = 10 -- If we get no notification within 10s, give up on u
 local MAX_ATTEMPTS = 2
 
 --[===[@debug@
-lib.debug = true
+lib.debug = false
 local function debug (...)
   if lib.debug then  -- allow programmatic override of debug output by client addons
-    print (...) 
+    print (...)
   end
 end
 --@end-debug@]===]
@@ -171,6 +172,7 @@ local UnitIsConnected                 = _G.UnitIsConnected
 local UnitIsPlayer                    = _G.UnitIsPlayer
 local UnitIsUnit                      = _G.UnitIsUnit
 local UnitName                        = _G.UnitName
+local SendAddonMessage                = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage -- XXX 8.0 compat
 
 
 local global_spec_id_roles_detailed = {
@@ -253,7 +255,11 @@ function lib:PLAYER_LOGIN ()
   frame:RegisterEvent ("UNIT_NAME_UPDATE")
   frame:RegisterEvent ("UNIT_AURA")
   frame:RegisterEvent ("CHAT_MSG_ADDON")
-  RegisterAddonMessagePrefix (COMMS_PREFIX)
+  if C_ChatInfo then -- XXX 8.0 compat
+    C_ChatInfo.RegisterAddonMessagePrefix (COMMS_PREFIX)
+  else
+    RegisterAddonMessagePrefix (COMMS_PREFIX)
+  end
 
   local guid = UnitGUID ("player")
   local info = self:BuildInfo ("player")
@@ -384,6 +390,7 @@ function lib:Query (unit)
     mainq[guid] = 1
     staleq[guid] = nil
     self.frame:Show () -- Start timer if not already running
+    self.events:Fire (QUEUE_EVENT)
   end
 end
 
@@ -396,6 +403,7 @@ function lib:Refresh (unit)
   if not self.state.mainq[guid] then
     self.state.staleq[guid] = 1
     self.frame:Show ()
+    self.events:Fire (QUEUE_EVENT)
   end
 end
 
@@ -464,6 +472,7 @@ function lib:ProcessQueues ()
   if not next (mainq) and not next (staleq) and self.state.throttle == 0 and self.state.debounce_send_update <= 0 then
     frame:Hide() -- Cancel timer, nothing queued and no unthrottling to be done
   end
+  self.events:Fire (QUEUE_EVENT)
 end
 
 
@@ -493,6 +502,7 @@ function lib:BuildInfo (unit)
   if not class and not self.state.mainq[guid] then
     self.state.staleq[guid] = 1
     self.frame:Show ()
+    self.events:Fire (QUEUE_EVENT)
   end
 
   local is_inspect = not UnitIsUnit (unit, "player")
@@ -567,6 +577,7 @@ function lib:INSPECT_READY (guid)
   if finalize then
     ClearInspectPlayer ()
   end
+  self.events:Fire (QUEUE_EVENT)
 end
 
 
@@ -732,6 +743,7 @@ function lib:CHAT_MSG_ADDON (prefix, datastr, scope, sender)
   --[===[@debug@
   debug ("Firing LGIST update event for unit "..unit..", GUID "..guid) --@end-debug@]===]
   self.events:Fire (UPDATE_EVENT, guid, unit, info)
+  self.events:Fire (QUEUE_EVENT)
 end
 
 
@@ -751,10 +763,10 @@ end
 
 
 function lib:PLAYER_SPECIALIZATION_CHANGED (unit)
---  This event seems to fire a lot, and for no particular reason *sigh*
---  if UnitInRaid (unit) or UnitInParty (unit) then
---    self:Refresh (unit)
---  end
+  --  This event seems to fire a lot, and for no particular reason *sigh*
+  --  if UnitInRaid (unit) or UnitInParty (unit) then
+  --    self:Refresh (unit)
+  --  end
   if unit and UnitIsUnit (unit, "player") then
     self:DoPlayerUpdate ()
   end
@@ -789,6 +801,7 @@ function lib:UNIT_AURA (unit)
           if not self.state.mainq[guid] then
             self.state.staleq[guid] = 1
             self.frame:Show ()
+            self.events:Fire (QUEUE_EVENT)
           end
         end
       elseif UnitIsConnected (unit) then
@@ -831,6 +844,11 @@ function lib:StaleInspections ()
 end
 
 
+function lib:IsInspectQueued (guid)
+  return guid and ((self.state.mainq[guid] or self.state.staleq[guid]) and true)
+end
+
+
 function lib:GetCachedInfo (guid)
   local group = self.cache
   return guid and group[guid]
@@ -866,6 +884,7 @@ function lib:Rescan (guid)
 
   -- Evict any stale entries
   self:GROUP_ROSTER_UPDATE ()
+  self.events:Fire (QUEUE_EVENT)
 end
 
 

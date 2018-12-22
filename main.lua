@@ -5,18 +5,18 @@ _G[addonName] = ZT;
 ZT.inspectLib = LibStub:GetLibrary("LibGroupInSpecT-1.1", true);
 
 -- Class/Spec ID List
-local DK = { ID = 6, name = "DEATHKNIGHT", Blood = 250, Frost = 251, Unholy = 252 }
-local DH = { ID = 12, name = "DEMONHUNTER", Havoc = 577, Veng = 581 }
-local Druid = { ID = 11, name = "DRUID", Balance = 102, Feral = 103, Guardian = 104, Resto = 105 }
-local Hunter = { ID = 3, name = "HUNTER", BM = 253, MM = 254, SV = 255 }
-local Mage = { ID = 8, name = "MAGE", Arcane = 62, Fire = 63, Frost = 64 }
-local Monk = { ID = 10, name = "MONK", BRM = 268, WW = 269, MW = 270 }
-local Paladin = { ID = 2, name = "PALADIN", Holy = 65, Prot = 66, Ret = 70 }
-local Priest = { ID = 5, name = "PRIEST", Disc = 256, Holy = 257, Shadow = 258 }
-local Rogue = { ID = 4, name = "ROGUE", Sin = 259, Outlaw = 260, Sub = 261 }
-local Shaman = { ID = 7, name = "SHAMAN", Ele = 262, Enh = 263, Resto = 264 }
-local Warlock = { ID = 9, name = "WARLOCK", Affl = 265, Demo = 266, Destro = 267 }
-local Warrior = { ID = 1, name = "WARRIOR", Arms = 71, Fury = 72, Prot = 73 }
+local DK = {ID=6, name="DEATHKNIGHT", Blood=250, Frost=251, Unholy=252}
+local DH = {ID=12, name="DEMONHUNTER", Havoc=577, Veng=581}
+local Druid = {ID=11, name="DRUID", Balance=102, Feral=103, Guardian=104, Resto=105}
+local Hunter = {ID=3, name="HUNTER", BM=253, MM=254, SV=255}
+local Mage = {ID=8, name="MAGE", Arcane=62, Fire=63, Frost=64}
+local Monk = {ID=10, name="MONK", BRM=268, WW=269, MW=270}
+local Paladin = {ID=2, name="PALADIN", Holy=65, Prot=66, Ret=70}
+local Priest = {ID=5, name="PRIEST", Disc=256, Holy=257, Shadow=258}
+local Rogue = {ID=4, name="ROGUE", Sin=259, Outlaw=260, Sub=261}
+local Shaman = {ID=7, name="SHAMAN", Ele=262, Enh=263, Resto=264}
+local Warlock = {ID=9, name="WARLOCK", Affl=265, Demo=266, Destro=267}
+local Warrior = {ID=1, name="WARRIOR", Arms=71, Fury=72, Prot=73}
 
 local AllClasses = {
 	[DK.name] = DK, [DH.name] = DH, [Druid.name] = Druid, [Hunter.name] = Hunter,
@@ -189,6 +189,7 @@ end
 -- BEGIN TRACKED SPELLS
 --------------------------------------------------------------------------------
 
+ZT.spellsVersion = 2
 ZT.typeToTrackedSpells = {}
 
 ZT.typeToTrackedSpells["INTERRUPT"] = {
@@ -229,6 +230,7 @@ ZT.typeToTrackedSpells["SOFTCC"] = {
 	{spellID=102359, class=Druid, baseCD=30, reqTalents={42}}, -- Mass Entanglement
 	{spellID=99, specs={Druid.Guardian}, baseCD=30}, -- Incapacitating Roar
 	{spellID=236748, specs={Druid.Guardian}, baseCD=30, reqTalents={22}}, -- Intimidating Roar
+	{spellID=102793, specs={Druid.Guardian}, baseCD=60, reqTalents={22}}, -- Ursol's Vortex
 	{spellID=102793, specs={Druid.Resto}, baseCD=60}, -- Ursol's Vortex
 	{spellID=109248, class=Hunter, baseCD=30, reqTalents={53}}, -- Binding Shot
 	{spellID=116844, class=Monk, baseCD=45, reqTalents={43}}, -- Ring of Peace
@@ -236,6 +238,7 @@ ZT.typeToTrackedSpells["SOFTCC"] = {
 	{spellID=8122, specs={Priest.Shadow}, baseCD=60}, -- Psychic Scream
 	{spellID=204263, specs={Priest.Disc,Priest.Holy}, baseCD=45, reqTalents={43}}, -- Shining Force
 	{spellID=51490, specs={Shaman.Ele}, baseCD=45}, -- Thunderstorm
+	{spellID=31661, specs={Mage.Fire}, baseCD=20, version=2}, -- Dragon's Breath
 }
 
 ZT.typeToTrackedSpells["STHARDCC"] = {
@@ -261,19 +264,21 @@ ZT.typeToTrackedSpells["STSOFTCC"] = {
 	{spellID=2094, specs={Rogue.Outlaw}, baseCD=120, modTalents={[52]=StaticMod("sub", 30)}}, -- Blind
 	{spellID=115078, class=Monk, baseCD=45}, -- Paralysis
 	{spellID=187650, class=Hunter, baseCD=30}, -- Freezing Trap
+	{spellID=49576, specs={DK.Blood}, baseCD=15, version=2}, -- Death Grip
+	{spellID=49576, specs={DK.Frost,DK.Unholy}, baseCD=25, version=2}, -- Death Grip
 }
 
 ZT.typeToTrackedSpells["DISPEL"] = {
-	{spellID=202719, race="BloodElf", class=DH, baseCD=90}, -- Arcane Torrent
-	{spellID=50613, race="BloodElf", class=DK, baseCD=90}, -- Arcane Torrent
-	{spellID=80483, race="BloodElf", class=Hunter, baseCD=90}, -- Arcane Torrent
-	{spellID=28730, race="BloodElf", class=Mage, baseCD=90}, -- Arcane Torrent
-	{spellID=129597, race="BloodElf", class=Monk, baseCD=90}, -- Arcane Torrent
-	{spellID=155145, race="BloodElf", class=Paladin, baseCD=90}, -- Arcane Torrent
-	{spellID=232633, race="BloodElf", class=Priest, baseCD=90}, -- Arcane Torrent
-	{spellID=25046, race="BloodElf", class=Rogue, baseCD=90}, -- Arcane Torrent
-	{spellID=28730, race="BloodElf", class=Warlock, baseCD=90}, -- Arcane Torrent
-	{spellID=69179, race="BloodElf", class=Warrior, baseCD=90}, -- Arcane Torrent
+	{spellID=202719, race="BloodElf", class=DH, baseCD=120}, -- Arcane Torrent
+	{spellID=50613, race="BloodElf", class=DK, baseCD=120}, -- Arcane Torrent
+	{spellID=80483, race="BloodElf", class=Hunter, baseCD=120}, -- Arcane Torrent
+	{spellID=28730, race="BloodElf", class=Mage, baseCD=120}, -- Arcane Torrent
+	{spellID=129597, race="BloodElf", class=Monk, baseCD=120}, -- Arcane Torrent
+	{spellID=155145, race="BloodElf", class=Paladin, baseCD=120}, -- Arcane Torrent
+	{spellID=232633, race="BloodElf", class=Priest, baseCD=120}, -- Arcane Torrent
+	{spellID=25046, race="BloodElf", class=Rogue, baseCD=120}, -- Arcane Torrent
+	{spellID=28730, race="BloodElf", class=Warlock, baseCD=120}, -- Arcane Torrent
+	{spellID=69179, race="BloodElf", class=Warrior, baseCD=120}, -- Arcane Torrent
 	{spellID=32375, class=Priest, baseCD=45}, -- Mass Dispel
 }
 
@@ -304,6 +309,7 @@ ZT.typeToTrackedSpells["EXTERNAL"] = {
 
 ZT.typeToTrackedSpells["HEALING"] = {
 	{spellID=740, specs={Druid.Resto}, baseCD=180, modTalents={[61]=StaticMod("sub", 60)}}, -- Tranquility
+	{spellID=191837, specs={Monk.MW}, baseCD=12, version=2}, -- TEST Essence Font
 	{spellID=115310, specs={Monk.MW}, baseCD=180}, -- Revival
 	{spellID=216331, specs={Paladin.Holy}, baseCD=120, reqTalents={62}}, -- Avenging Crusader
 	{spellID=105809, specs={Paladin.Holy}, baseCD=90, reqTalents={53}}, -- Holy Avenger
@@ -311,7 +317,7 @@ ZT.typeToTrackedSpells["HEALING"] = {
 	{spellID=633, specs={Paladin.Prot,Paladin.Ret}, baseCD=600, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Lay on Hands
 	{spellID=210191, specs={Paladin.Ret}, baseCD=60, reqTalents={63}}, -- Word of Glory
 	{spellID=47536, specs={Priest.Disc}, baseCD=90}, -- Rapture
-	{spellID=246287, specs={Priest.Disc}, baseCD=75, reqTalents={73}}, -- Evangelism
+	{spellID=246287, specs={Priest.Disc}, baseCD=90, reqTalents={73}}, -- Evangelism
 	{spellID=64843, specs={Priest.Holy}, baseCD=180}, -- Divine Hymn
 	{spellID=200183, specs={Priest.Holy}, baseCD=120, reqTalents={72}}, -- Apotheosis
 	{spellID=265202, specs={Priest.Holy}, baseCD=720, reqTalents={73}, mods={CastDeltaMod(34861,-30), CastDeltaMod(2050,-30)}}, -- Holy Word: Salvation
@@ -328,6 +334,10 @@ ZT.typeToTrackedSpells["UTILITY"] = {
 	{spellID=114018, class=Rogue, baseCD=360}, -- Shroud of Concealment
 	{spellID=29166, specs={Druid.Balance,Druid.Resto}, baseCD=180}, -- Innervate
 	{spellID=64901, specs={Priest.Holy}, baseCD=300}, -- Symbol of Hope
+	{spellID=198103, class=Shaman, baseCD=300, version=2}, -- Earth Elemental
+	{spellID=192077, class=Shaman, baseCD=120, reqTalents={53}, version=2}, -- Wind Rush Totem
+	{spellID=106898, specs={Druid.Guardian}, baseCD=60, version=2}, -- Stampeding Roar
+	{spellID=106898, specs={Druid.Feral}, baseCD=120, version=2}, -- Stampeding Roar
 }
 
 ZT.typeToTrackedSpells["PERSONAL"] = {
@@ -355,6 +365,8 @@ ZT.typeToTrackedSpells["PERSONAL"] = {
 	{spellID=205191, specs={Paladin.Ret}, baseCD=60, reqTalents={53}}, -- Eye for an Eye
 	{spellID=19236, specs={Priest.Disc, Priest.Holy}, baseCD=90}, -- Desperate Prayer
 	{spellID=47585, specs={Priest.Shadow}, baseCD=120}, -- Dispersion
+	{spellID=5277, specs={Rogue.Sin, Rogue.Sub}, baseCD=120, version=2}, -- Evasion
+	{spellID=199754, specs={Rogue.Outlaw}, baseCD=120, version=2}, -- Riposte
 	{spellID=108271, class=Shaman, baseCD=90}, -- Astral Shift
 	{spellID=104773, class=Warlock, baseCD=180}, -- Unending Resolve
 	{spellID=118038, specs={Warrior.Arms}, baseCD=180}, -- Die by the Sword
@@ -400,7 +412,7 @@ ZT.typeToTrackedSpells["DAMAGE"] = {
 	{spellID=31884, specs={Paladin.Ret}, baseCD=120, reqTalents={71,73}}, -- Avenging Wrath
 	{spellID=231895, specs={Paladin.Ret}, baseCD=120, reqTalents={72}}, -- Crusade
 	{spellID=280711, specs={Priest.Shadow}, baseCD=60, reqTalents={72}}, -- Dark Ascension
-	{spellID=193223, specs={Priest.Shadow}, baseCD=240, reqTalents={73}}, -- Surrender to Madness
+	{spellID=193223, specs={Priest.Shadow}, baseCD=180, reqTalents={73}}, -- Surrender to Madness
 	{spellID=79140, specs={Rogue.Sin}, baseCD=120}, -- Vendetta
 	{spellID=121471, specs={Rogue.Sub}, baseCD=180}, -- Shadow Blades
 	{spellID=13750, specs={Rogue.Outlaw}, baseCD=180}, -- Adrenaline Rush
@@ -430,7 +442,8 @@ ZT.typeToTrackedSpells["TANK"] = {
 ZT.linkedSpellIDs = {
 	[19647]  = {119910, 132409, 115781}, -- Spell Lock
 	[132469] = {61391}, -- Typhoon
-	[191427] = {200166} -- Metamorphosis
+	[191427] = {200166}, -- Metamorphosis
+	[106898] = {77761, 77764}, -- Stampeding Roar
 }
 
 ZT.specialConfigSpellIDs = {
@@ -446,6 +459,8 @@ ZT.specialConfigSpellIDs = {
 	[69179]  = "ArcaneTorrent",
 	[221562] = "Asphyxiate",
 	[108194] = "Asphyxiate",
+	[5277]   = "Evasion/Riposte",
+	[199754] = "Evasion/Riposte",
 }
 
 -- Building a complete list of tracked spells
@@ -455,6 +470,11 @@ function ZT:BuildSpellList()
 	for type,spells in pairs(self.typeToTrackedSpells) do
 		for _,spellInfo in ipairs(spells) do
 			spellInfo.type = type
+
+			-- If no version, assign version=1
+			if not spellInfo.version then
+				spellInfo.version = 1
+			end
 
 			-- Creating a lookup map from list of valid specs
 			if spellInfo.specs then
@@ -507,6 +527,58 @@ function ZT:BuildSpellList()
 		end
 	end
 end
+
+-- Adding custom spells from the user to the table
+local spellConfigFuncHeader = "return function(DK,DH,Druid,Hunter,Mage,Monk,Paladin,Priest,Rogue,Shaman,Warlock,Warrior,StaticMod,DynamicMod,EventDeltaMod,CastDeltaMod,EventRemainingMod,CastRemainingMod,DispelMod)"
+
+local function trim(s) -- From PiL2 20.4
+	return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+local function addCustomSpell(spellConfig, i)
+	if not spellConfig or type(spellConfig) ~= "table" then
+		print("[ZT] Custom Spell", i, "is not represented as a valid table")
+		return
+	end
+
+	if type(spellConfig.type) ~= "string" then
+		print("[ZT] Custom Spell", i, "does not have a valid 'type' entry")
+		return
+	end
+
+	if type(spellConfig.spellID) ~= "number" then
+		print("[ZT] Custom Spell", i, "does not have a valid 'spellID' entry")
+		return
+	end
+
+	if type(spellConfig.baseCD) ~= "number" then
+		print("[ZT] Custom Spell", i, "does not have a valid 'baseCD' entry")
+		return
+	end
+
+	spellConfig.version = 10000
+	spellConfig.isCustom = true
+
+	local spells = ZT.typeToTrackedSpells[spellConfig.type]
+	spells[#spells + 1] = spellConfig
+end
+
+--for i = 1,11 do
+--	local spellConfig = ZT.config["custom"..i]
+--	if spellConfig then
+--		spellConfig = trim(spellConfig)
+--	end
+--
+--	if spellConfig and spellConfig ~= "" then
+--		local spellConfigFuncStr = spellConfigFuncHeader.." return "..spellConfig.." end"
+--		local spellConfigFunc = WeakAuras.LoadFunction(spellConfigFuncStr, "ZenTracker Custom Spell "..i)
+--		if spellConfigFunc then
+--			local spellConfig = spellConfigFunc(DK,DH,Druid,Hunter,Mage,Monk,Paladin,Priest,Rogue,Shaman,Warlock,Warrior,
+--					StaticMod,DynamicMod,EventDeltaMod,CastDeltaMod,EventRemainingMod,CastRemainingMod,DispelMod)
+--			addCustomSpell(spellConfig, i)
+--		end
+--	end
+--end
 
 --------------------------------------------------------------------------------
 -- END TRACKED SPELLS
@@ -798,7 +870,7 @@ function ZT:watch(spellInfo, member, specInfo, isHidden)
 		if isNew then
 			self:togglePlayerHandlers(watchInfo, true)
 		end
-	elseif member.tracking == "CombatLog" then
+	elseif member.tracking == "CombatLog" or (member.tracking == "Sharing" and member.spellsVersion < spellInfo.version) then
 		if isNew then
 			self:toggleCombatLogHandlers(watchInfo, true, specInfo)
 		else
@@ -824,7 +896,7 @@ function ZT:unwatch(spellInfo, member, specInfo, keepHidden)
 			end
 
 			self:togglePlayerHandlers(watchInfo, false)
-		elseif member.tracking == "CombatLog" then
+		elseif member.tracking == "CombatLog"  or (member.tracking == "Sharing" and member.spellsVersion < spellInfo.version) then
 			self:toggleCombatLogHandlers(watchInfo, false, specInfo or member.specInfo)
 		end
 
@@ -1012,7 +1084,7 @@ function ZT:addOrUpdateMember(memberInfo)
 		local _,className,_,race,_,name = GetPlayerInfoByGUID(member.GUID)
 		member.name = name and gsub(name, "%-[^|]+", "") or nil
 		if self.db.debugTracking and (member.tracking == "Sharing") and member.name then
-			print(member.name, "is using ZenTracker")
+			print("[ZT]", member.name, "is using ZenTracker ( SpellsVersion =", member.spellsVersion, ")")
 		end
 		member.class = className and AllClasses[className] or nil
 		member.classID = className and AllClasses[className].ID or nil
@@ -1073,16 +1145,22 @@ function ZT:addOrUpdateMember(memberInfo)
 		member.specInfo = specInfo
 	end
 
-	-- If tracking changed from "CombatLog" to "Sharing", remove event handlers and send a handshake/updates
+	-- If tracking changed from "CombatLog" to "Sharing", remove unnecessary event handlers and send a handshake/updates
 	if (member.tracking == "CombatLog") and (memberInfo.tracking == "Sharing") then
 		member.tracking = "Sharing"
+		member.spellsVersion = memberInfo.spellsVersion
+
 		if self.db.debugTracking and member.name then
-			print(member.name, "is using ZenTracker")
+			print("[ZT]", member.name, "is using ZenTracker ( SpellsVersion =", member.spellsVersion, ")")
 		end
 
-		self:removeAllEventHandlers(member.GUID)
-		self:sendHandshake()
+		for _,watchInfo in pairs(member.watching) do
+			if watchInfo.spellInfo.version <= member.spellsVersion then
+				self:toggleCombatLogHandlers(watchInfo, false, member.specInfo)
+			end
+		end
 
+		self:sendHandshake()
 		local time = GetTime()
 		for _,watchInfo in pairs(self.members[UnitGUID("player")].watching) do
 			if watchInfo.expiration > time then
@@ -1141,11 +1219,11 @@ end
 
 -- Message Format = <Protocol Version (%d)>:<Message Type (%s)>:<Member GUID (%s)>...
 --   Type = "H" (Handshake)
---     ...:<Spec ID (%d)>:<Talents (%s)>
+--     ...:<Spec ID (%d)>:<Talents (%s)>:<IsInitial? (%d) [2]>:<Spells Version (%d) [2]>
 --   Type = "U" (CD Update)
 --     ...:<Spell ID (%d)>:<Duration (%f)>:<Remaining (%f)>
 
-ZT.protocolVersion = 1
+ZT.protocolVersion = 2
 
 ZT.timeBetweenHandshakes = 5 --seconds
 ZT.timeOfLastHandshake = 0
@@ -1168,6 +1246,7 @@ local function sendMessage(message)
 	C_ChatInfo_SendAddonMessage("ZenTracker", message, channel)
 end
 
+ZT.hasSentHandshake = false
 function ZT:sendHandshake(specInfo)
 	local time = GetTime()
 	local timeSinceLastHandshake = (time - self.timeOfLastHandshake)
@@ -1183,11 +1262,13 @@ function ZT:sendHandshake(specInfo)
 	specInfo = specInfo or self.members[GUID].specInfo
 	local specID = specInfo.specID or 0
 	local talents = specInfo.talents or ""
-	local message = string.format("%d:H:%s:%d:%s", self.protocolVersion, GUID, specID, talents)
+	local isInitial = self.hasSentHandshake and 0 or 1
+	local message = string.format("%d:H:%s:%d:%s:%d:%d", self.protocolVersion, GUID, specID, talents, isInitial, self.spellsVersion)
 	sendMessage(message)
 
 	self.timeOfLastHandshake = time
 	self.queuedHandshake = false
+	self.hasSentHandshake = true
 end
 
 function ZT:sendCDUpdate(watchInfo, ignoreRateLimit, wasQueued)
@@ -1230,7 +1311,7 @@ function ZT:sendCDUpdate(watchInfo, ignoreRateLimit, wasQueued)
 	self.queuedCDUpdates[spellID] = false
 end
 
-function ZT:handleHandshake(mGUID, specID, talents)
+function ZT:handleHandshake(mGUID, specID, talents, isInitial, spellsVersion)
 	specID = tonumber(specID)
 	if specID == 0 then
 		specID = nil
@@ -1246,6 +1327,23 @@ function ZT:handleHandshake(mGUID, specID, talents)
 		talents = nil
 	end
 
+	-- Protocol V2: Assume false if not present
+	if isInitial == "1" then
+		isInitial = true
+	else
+		isInitial = false
+	end
+
+	-- Protocol V2: Assume spellsVersion is 1 if not present
+	if spellsVersion then
+		spellsVersion = tonumber(spellsVersion)
+		if not spellsVersion then
+			spellsVersion = 1
+		end
+	else
+		spellsVersion = 1
+	end
+
 	local memberInfo = {
 		GUID = mGUID,
 		specInfo = {
@@ -1254,9 +1352,13 @@ function ZT:handleHandshake(mGUID, specID, talents)
 			talentsMap = talentsMap,
 		},
 		tracking = "Sharing",
+		spellsVersion = spellsVersion,
 	}
 
 	self:addOrUpdateMember(memberInfo)
+	if isInitial then
+		self:sendHandshake()
+	end
 end
 
 function ZT:handleCDUpdate(mGUID, spellID, duration, remaining)
@@ -1277,14 +1379,6 @@ function ZT:handleCDUpdate(mGUID, spellID, duration, remaining)
 		local watchInfo = sources[member.GUID]
 		if not watchInfo then
 			return
-		end
-
-		if member.tracking == "CombatLog" then
-			member.tracking = "Sharing"
-			if self.db.debugTracking then
-				print(member.name, "is using ZenTracker")
-			end
-			self:removeAllEventHandlers(member.GUID)
 		end
 
 		watchInfo.duration = duration

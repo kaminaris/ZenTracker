@@ -38,6 +38,22 @@ local GetTime = GetTime
 local UnitGUID = UnitGUID
 local C_ChatInfo_SendAddonMessage = C_ChatInfo.SendAddonMessage
 
+local IterateGroupMembers = function(reversed, forceParty)
+	local unit = (not forceParty and IsInRaid()) and 'raid' or 'party'
+	local numGroupMembers = unit == 'party' and GetNumSubgroupMembers() or GetNumGroupMembers()
+	local i = reversed and numGroupMembers or (unit == 'party' and 0 or 1)
+	return function()
+		local ret
+		if i == 0 and unit == 'party' then
+			ret = 'player'
+		elseif i <= numGroupMembers and i > 0 then
+			ret = unit .. i
+		end
+		i = i + (reversed and -1 or 1)
+		return ret
+	end
+end
+
 --------------------------------------------------------------------------------
 -- BEGIN SPELL COOLDOWN MODIFIERS
 --------------------------------------------------------------------------------
@@ -675,7 +691,7 @@ end
 local function fixSourceGUID(sourceGUID) -- Based on https://wago.io/p/Nnogga
 	local type = strsplit("-",sourceGUID)
 	if type == "Pet" then
-		for unit in WA_IterateGroupMembers() do
+		for unit in IterateGroupMembers() do
 			if UnitGUID(unit.."pet") == sourceGUID then
 				sourceGUID = UnitGUID(unit)
 				break
@@ -1452,22 +1468,6 @@ function ZT:libInspectRemove(event, GUID)
 		self:unwatch(watchInfo.spellInfo, member)
 	end
 	self.members[GUID] = nil
-end
-
-local IterateGroupMembers = function(reversed, forceParty)
-	local unit = (not forceParty and IsInRaid()) and 'raid' or 'party'
-	local numGroupMembers = unit == 'party' and GetNumSubgroupMembers() or GetNumGroupMembers()
-	local i = reversed and numGroupMembers or (unit == 'party' and 0 or 1)
-	return function()
-		local ret
-		if i == 0 and unit == 'party' then
-			ret = 'player'
-		elseif i <= numGroupMembers and i > 0 then
-			ret = unit .. i
-		end
-		i = i + (reversed and -1 or 1)
-		return ret
-	end
 end
 
 function ZT:Init()

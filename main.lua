@@ -415,7 +415,7 @@ ZT.typeToTrackedSpells["DAMAGE"] = {
 	{spellID=19574, specs={Hunter.BM}, baseCD=90}, -- Bestial Wrath
 	{spellID=193530, specs={Hunter.BM}, baseCD=120}, -- Aspect of the Wild
 	{spellID=201430, specs={Hunter.BM}, baseCD=180, reqTalents={63}}, -- Stampede
-	{spellID=193526, specs={Hunter.MM}, baseCD=180}, -- Trueshot
+	{spellID=288613, specs={Hunter.MM}, baseCD=120}, -- Trueshot
 	{spellID=266779, specs={Hunter.SV}, baseCD=120}, -- Coordinated Assault
 	{spellID=12042, specs={Mage.Arcane}, baseCD=90}, -- Arcane Power
 	{spellID=190319, specs={Mage.Fire}, baseCD=120}, -- Combustion
@@ -477,6 +477,7 @@ ZT.specialConfigSpellIDs = {
 	[108194] = "Asphyxiate",
 	[5277]   = "Evasion/Riposte",
 	[199754] = "Evasion/Riposte",
+	[288613] = 193526,
 }
 
 -- Building a complete list of tracked spells

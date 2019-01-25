@@ -205,7 +205,7 @@ end
 -- BEGIN TRACKED SPELLS
 --------------------------------------------------------------------------------
 
-ZT.spellsVersion = 2
+ZT.spellsVersion = 3
 ZT.typeToTrackedSpells = {}
 
 ZT.typeToTrackedSpells["INTERRUPT"] = {
@@ -250,6 +250,7 @@ ZT.typeToTrackedSpells["SOFTCC"] = {
 	{spellID=102793, specs={Druid.Resto}, baseCD=60}, -- Ursol's Vortex
 	{spellID=109248, class=Hunter, baseCD=30, reqTalents={53}}, -- Binding Shot
 	{spellID=116844, class=Monk, baseCD=45, reqTalents={43}}, -- Ring of Peace
+	{spellID=115750, class=Paladin, baseCD=90, reqTalents={33}, version=3}, -- Blinding Light
 	{spellID=8122, specs={Priest.Disc,Priest.Holy}, baseCD=60, modTalents={[41]=StaticMod("sub", 30)}}, -- Psychic Scream
 	{spellID=8122, specs={Priest.Shadow}, baseCD=60}, -- Psychic Scream
 	{spellID=204263, specs={Priest.Disc,Priest.Holy}, baseCD=45, reqTalents={43}}, -- Shining Force
@@ -325,7 +326,6 @@ ZT.typeToTrackedSpells["EXTERNAL"] = {
 
 ZT.typeToTrackedSpells["HEALING"] = {
 	{spellID=740, specs={Druid.Resto}, baseCD=180, modTalents={[61]=StaticMod("sub", 60)}}, -- Tranquility
-	{spellID=191837, specs={Monk.MW}, baseCD=12, version=2}, -- TEST Essence Font
 	{spellID=115310, specs={Monk.MW}, baseCD=180}, -- Revival
 	{spellID=216331, specs={Paladin.Holy}, baseCD=120, reqTalents={62}}, -- Avenging Crusader
 	{spellID=105809, specs={Paladin.Holy}, baseCD=90, reqTalents={53}}, -- Holy Avenger
@@ -354,6 +354,7 @@ ZT.typeToTrackedSpells["UTILITY"] = {
 	{spellID=192077, class=Shaman, baseCD=120, reqTalents={53}, version=2}, -- Wind Rush Totem
 	{spellID=106898, specs={Druid.Guardian}, baseCD=60, version=2}, -- Stampeding Roar
 	{spellID=106898, specs={Druid.Feral}, baseCD=120, version=2}, -- Stampeding Roar
+	{spellID=58984, race="NightElf", baseCD=120, version=3}, -- Shadowmeld
 }
 
 ZT.typeToTrackedSpells["PERSONAL"] = {
@@ -411,6 +412,7 @@ ZT.typeToTrackedSpells["DAMAGE"] = {
 	{spellID=207289, specs={DK.Unholy}, baseCD=75, reqTalents={72}}, -- Unholy Frenzy
 	{spellID=194223, specs={Druid.Balance}, baseCD=180, reqTalents={51,52}}, -- Celestial Alignment
 	{spellID=102560, specs={Druid.Balance}, baseCD=180, reqTalents={53}}, -- Incarnation: Chosen of Elune
+	{spellID=106951, specs={Druid.Feral}, baseCD=180, version=3}, -- Berserk
 	{spellID=102543, specs={Druid.Feral}, baseCD=180, reqTalents={53}}, -- Incarnation: King of the Jungle
 	{spellID=19574, specs={Hunter.BM}, baseCD=90}, -- Bestial Wrath
 	{spellID=193530, specs={Hunter.BM}, baseCD=120}, -- Aspect of the Wild
@@ -434,6 +436,8 @@ ZT.typeToTrackedSpells["DAMAGE"] = {
 	{spellID=13750, specs={Rogue.Outlaw}, baseCD=180}, -- Adrenaline Rush
 	{spellID=51690, specs={Rogue.Outlaw}, baseCD=120, reqTalents={73}}, -- Killing Spree
 	{spellID=114050, specs={Shaman.Ele}, baseCD=180, reqTalents={73}}, -- Ascendance
+	{spellID=192249, specs={Shaman.Ele}, baseCD=150, reqTalents={42}, version=3}, -- Storm Elemental
+	{spellID=191634, specs={Shaman.Ele}, baseCD=60, reqTalents={72}, version=3}, -- Stormkeeper
 	{spellID=114051, specs={Shaman.Enh}, baseCD=180, reqTalents={73}}, -- Ascendance
 	{spellID=205180, specs={Warlock.Affl}, baseCD=180}, -- Summon Darkglare
 	{spellID=113860, specs={Warlock.Affl}, baseCD=120, reqTalents={73}}, -- Dark Soul: Misery
@@ -460,6 +464,7 @@ ZT.linkedSpellIDs = {
 	[132469] = {61391}, -- Typhoon
 	[191427] = {200166}, -- Metamorphosis
 	[106898] = {77761, 77764}, -- Stampeding Roar
+	[86659] = {212641}, -- Guardian of the Ancient Kings (+Glyph)
 }
 
 ZT.specialConfigSpellIDs = {
@@ -477,7 +482,6 @@ ZT.specialConfigSpellIDs = {
 	[108194] = "Asphyxiate",
 	[5277]   = "Evasion/Riposte",
 	[199754] = "Evasion/Riposte",
-	[288613] = 193526,
 }
 
 -- Building a complete list of tracked spells

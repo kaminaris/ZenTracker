@@ -238,14 +238,13 @@ ZT.typeToTrackedSpells["HARDCC"] = {
 
 ZT.typeToTrackedSpells["SOFTCC"] = {
 	{spellID=202138, specs={DH.Veng}, baseCD=90, reqTalents={53}}, -- Sigil of Chains
-	{spellID=207684, specs={DH.Veng}, baseCD=90}, -- Sigil of Misery
+	{spellID=207684, specs={DH.Veng}, baseCD=90, modTalents={[52]=StaticMod("mul", 0.8)}}, -- Sigil of Misery
 	{spellID=202137, specs={DH.Veng}, baseCD=60, modTalents={[52]=StaticMod("mul", 0.8)}}, -- Sigil of Silence
 	{spellID=108199, specs={DK.Blood}, baseCD=120, modTalents={[52]=StaticMod("sub", 30)}}, -- Gorefiend's Grasp
 	{spellID=207167, specs={DK.Frost}, baseCD=60, reqTalents={33}}, -- Blinding Sleet
 	{spellID=132469, class=Druid, baseCD=30, reqTalents={43}}, -- Typhoon
 	{spellID=102359, class=Druid, baseCD=30, reqTalents={42}}, -- Mass Entanglement
 	{spellID=99, specs={Druid.Guardian}, baseCD=30}, -- Incapacitating Roar
-	{spellID=236748, specs={Druid.Guardian}, baseCD=30, reqTalents={22}}, -- Intimidating Roar
 	{spellID=102793, specs={Druid.Guardian}, baseCD=60, reqTalents={22}}, -- Ursol's Vortex
 	{spellID=102793, specs={Druid.Resto}, baseCD=60}, -- Ursol's Vortex
 	{spellID=109248, class=Hunter, baseCD=30, reqTalents={53}}, -- Binding Shot

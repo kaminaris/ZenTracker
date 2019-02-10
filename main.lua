@@ -746,7 +746,7 @@ end
 ZT.nextWatchID = 1
 ZT.watching = {}
 
-local function WatchInfo_handleReady(self, expiration)
+local function WatchInfo_handleReadyTimer(self, expiration)
 	if expiration == self.expiration then
 		sendFrontEndTrigger(self)
 		self.lastExpiration = expiration
@@ -760,9 +760,9 @@ local function WatchInfo_startReadyTimer(self, remaining)
 
 	if remaining > 0 then
 		local expiration = self.expiration
-		C_Timer_After(remaining, function() WatchInfo_handleReady(self, expiration) end)
+		C_Timer_After(remaining, function() WatchInfo_handleReadyTimer(self, expiration) end)
 	else
-		WatchInfo_handleReady(self, self.expiration)
+		WatchInfo_handleReadyTimer(self, self.expiration)
 	end
 end
 

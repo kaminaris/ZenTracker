@@ -36,7 +36,9 @@ local IsInGroup = IsInGroup
 local IsInRaid = IsInRaid
 local GetTime = GetTime
 local UnitGUID = UnitGUID
+local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
 local C_ChatInfo_SendAddonMessage = C_ChatInfo.SendAddonMessage
+local C_Timer_After = C_Timer.After
 
 local IterateGroupMembers = function(reversed, forceParty)
 	local unit = (not forceParty and IsInRaid()) and 'raid' or 'party'
@@ -205,7 +207,7 @@ end
 -- BEGIN TRACKED SPELLS
 --------------------------------------------------------------------------------
 
-ZT.spellsVersion = 3
+ZT.spellsVersion = 5
 ZT.typeToTrackedSpells = {}
 
 ZT.typeToTrackedSpells["INTERRUPT"] = {
@@ -282,6 +284,7 @@ ZT.typeToTrackedSpells["STSOFTCC"] = {
 	{spellID=187650, class=Hunter, baseCD=30}, -- Freezing Trap
 	{spellID=49576, specs={DK.Blood}, baseCD=15, version=2}, -- Death Grip
 	{spellID=49576, specs={DK.Frost,DK.Unholy}, baseCD=25, version=2}, -- Death Grip
+	{spellID=107079, race="Pandaren", baseCD=120, version=4}, -- Quaking Palm
 }
 
 ZT.typeToTrackedSpells["DISPEL"] = {
@@ -376,7 +379,7 @@ ZT.typeToTrackedSpells["PERSONAL"] = {
 	{spellID=122470, specs={Monk.WW}, baseCD=90}, -- Touch of Karma
 	{spellID=498, specs={Paladin.Holy}, baseCD=60}, -- Divine Protection
 	{spellID=31850, specs={Paladin.Prot}, baseCD=120}, -- Ardent Defender
-	{spellID=86659, specs={Paladin.Prot}, baseCD=300}, -- Guardian of the Ancient Kings
+	{spellID=86659, specs={Paladin.Prot}, baseCD=300, version=5}, -- Guardian of the Ancient Kings
 	{spellID=184662, specs={Paladin.Ret}, baseCD=120}, -- Shield of Vengeance
 	{spellID=205191, specs={Paladin.Ret}, baseCD=60, reqTalents={53}}, -- Eye for an Eye
 	{spellID=19236, specs={Priest.Disc, Priest.Holy}, baseCD=90}, -- Desperate Prayer
@@ -455,6 +458,7 @@ ZT.typeToTrackedSpells["TANK"] = {
 	{spellID=194679, specs={DK.Blood}, baseCD=25, reqTalents={43}}, -- Rune Tap
 	{spellID=194844, specs={DK.Blood}, baseCD=60, reqTalents={73}}, -- Bonestorm
 	{spellID=204021, specs={DH.Veng}, baseCD=60}, -- Fiery Brand
+	{spellID=132578, specs={Monk.BRM}, baseCD=180, reqTalents={63}, version=4}, -- Invoke Niuzao
 	{spellID=1160, specs={Warrior.Prot}, baseCD=45}, -- Demoralizing Shout
 }
 
@@ -463,6 +467,10 @@ ZT.linkedSpellIDs = {
 	[132469] = {61391}, -- Typhoon
 	[191427] = {200166}, -- Metamorphosis
 	[106898] = {77761, 77764}, -- Stampeding Roar
+	[86659] = {212641}, -- Guardian of the Ancient Kings (+Glyph)
+}
+
+ZT.separateLinkedSpellIDs = {
 	[86659] = {212641}, -- Guardian of the Ancient Kings (+Glyph)
 }
 
@@ -481,6 +489,8 @@ ZT.specialConfigSpellIDs = {
 	[108194] = "Asphyxiate",
 	[5277]   = "Evasion/Riposte",
 	[199754] = "Evasion/Riposte",
+	[114050] = "Ascendance",
+	[114051] = "Ascendance",
 }
 
 -- Building a complete list of tracked spells
@@ -623,9 +633,9 @@ local function sendFrontEndAdd(watchInfo)
 	local spellInfo = watchInfo.spellInfo
 
 	if ZT.db.debugEvents then
-		print("[ZT] Sending ZT_ADD", spellInfo.type, watchInfo.watchID, watchInfo.member.name, spellInfo.spellID)
+		print("[ZT] Sending ZT_ADD", spellInfo.type, watchInfo.watchID, watchInfo.member.name, spellInfo.spellID, watchInfo.duration)
 	end
-	WeakAuras.ScanEvents("ZT_ADD", spellInfo.type, watchInfo.watchID, watchInfo.member, spellInfo.spellID)
+	WeakAuras.ScanEvents("ZT_ADD", spellInfo.type, watchInfo.watchID, watchInfo.member, spellInfo.spellID, watchInfo.duration)
 
 	if watchInfo.expiration > GetTime() then
 		sendFrontEndTrigger(watchInfo)
@@ -727,7 +737,7 @@ function ZT:handleEvent(type, spellID, sourceGUID)
 	end
 
 	for handler,data in pairs(handlers) do
-		handler(data)
+		handler(data, spellID)
 	end
 end
 
@@ -735,23 +745,39 @@ end
 ZT.nextWatchID = 1
 ZT.watching = {}
 
+local function WatchInfo_startReadyTimer(self, remaining)
+	if self.lastExpiration >= self.expiration then
+		return
+	end
+
+	if remaining > 0 then
+		local expiration = self.expiration
+		C_Timer_After(remaining, function() WatchInfo_handleReady(self, expiration) end)
+	else
+		WatchInfo_handleReady(self, self.expiration)
+	end
+end
+
 local function WatchInfo_startCooldown(self)
 	self.expiration = GetTime() + self.duration
 	sendFrontEndTrigger(self)
+	WatchInfo_startReadyTimer(self, self.duration)
 end
 
 local function WatchInfo_updateDelta(self, delta)
 	self.expiration = self.expiration + delta
 	sendFrontEndTrigger(self)
+	WatchInfo_startReadyTimer(self, self.expiration - GetTime())
 end
 
 local function WatchInfo_updateRemaining(self, remaining)
 	self.expiration = GetTime() + remaining
 	sendFrontEndTrigger(self)
+	WatchInfo_startReadyTimer(self, remaining)
 end
 
-local function WatchInfo_update(self, ignoreIfReady, ignoreRateLimit)
-	local startTime, duration, enabled = GetSpellCooldown(self.spellInfo.spellID)
+local function WatchInfo_update(self, spellID, ignoreIfReady, ignoreRateLimit)
+	local startTime, duration, enabled = GetSpellCooldown(spellID)
 	if enabled ~= 0 then
 		if startTime ~= 0 then
 			self.duration = duration
@@ -767,12 +793,12 @@ local function WatchInfo_update(self, ignoreIfReady, ignoreRateLimit)
 	end
 end
 
-local function WatchInfo_handleStarted(self)
-	WatchInfo_update(self, false, true)
+local function WatchInfo_handleStarted(self, spellID)
+	WatchInfo_update(self, spellID, false, true)
 end
 
-local function WatchInfo_handleChanged(self)
-	WatchInfo_update(self, false, false)
+local function WatchInfo_handleChanged(self, spellID)
+	WatchInfo_update(self, spellID, false, false)
 end
 
 local function WatchInfo_handleReady(self)
@@ -780,7 +806,12 @@ local function WatchInfo_handleReady(self)
 	sendFrontEndTrigger(self)
 	ZT:sendCDUpdate(self, true)
 end
-
+local function WatchInfo_handleReady(self, expiration)
+	if expiration == self.expiration then
+		sendFrontEndTrigger(self)
+		self.lastExpiration = expiration
+	end
+end
 local function WatchInfo_hide(self)
 	sendFrontEndRemove(self)
 	self.isHidden = true
@@ -801,6 +832,18 @@ function ZT:togglePlayerHandlers(watchInfo, enable)
 	toggleEventHandler(self, "SPELL_COOLDOWN_STARTED", spellID, 0, WatchInfo_handleStarted, watchInfo)
 	toggleEventHandler(self, "SPELL_COOLDOWN_CHANGED", spellID, 0, WatchInfo_handleChanged, watchInfo)
 	toggleEventHandler(self, "SPELL_COOLDOWN_READY", spellID, 0, WatchInfo_handleReady, watchInfo)
+
+	local links = self.separateLinkedSpellIDs[spellID]
+	if links then
+		for _,linkedSpellID in ipairs(links) do
+			if enable then
+				WeakAuras.WatchSpellCooldown(linkedSpellID)
+			end
+			toggleEventHandler(self, "SPELL_COOLDOWN_STARTED", linkedSpellID, 0, WatchInfo_handleStarted, watchInfo)
+			toggleEventHandler(self, "SPELL_COOLDOWN_CHANGED", linkedSpellID, 0, WatchInfo_handleChanged, watchInfo)
+			toggleEventHandler(self, "SPELL_COOLDOWN_READY", linkedSpellID, 0, WatchInfo_handleReady, watchInfo)
+		end
+	end
 end
 
 function ZT:toggleCombatLogHandlers(watchInfo, enable, specInfo)
@@ -855,13 +898,15 @@ function ZT:watch(spellInfo, member, specInfo, isHidden)
 	local isNew = (watchInfo == nil)
 
 	if not watchInfo then
+		local time = GetTime()
 		watchInfo = {
 			watchID = self.nextWatchID,
 			member = member,
 			spellInfo = spellInfo,
 			duration = member:computeCooldown(spellInfo, specInfo),
-			expiration = GetTime(),
+			expiration = time,
 			isHidden = isHidden,
+			lastExpiration = time,
 			startCooldown = WatchInfo_startCooldown,
 			update = WatchInfo_update,
 			updateDelta = WatchInfo_updateDelta,
@@ -883,10 +928,17 @@ function ZT:watch(spellInfo, member, specInfo, isHidden)
 	end
 
 	if member.isPlayer then
-		watchInfo:update(true)
+		WatchInfo_update(watchInfo, spellID, true)
+
+		local links = self.separateLinkedSpellIDs[spellID]
+		if links then
+			for _, linkedSpellID in ipairs(links) do
+				WatchInfo_update(watchInfo, linkedSpellID, true)
+			end
+		end
 	end
 
-	if member.isPlayer then
+	if member.isPlayer and not self.db.debugCleu then
 		if isNew then
 			self:togglePlayerHandlers(watchInfo, true)
 		end
@@ -909,7 +961,7 @@ function ZT:unwatch(spellInfo, member, specInfo, keepHidden)
 
 	local watchInfo = sources[member.GUID]
 	if watchInfo then
-		if member.isPlayer then
+		if member.isPlayer and not self.db.debugCleu then
 			if keepHidden then
 				WatchInfo_hide(watchInfo)
 				return
@@ -922,6 +974,7 @@ function ZT:unwatch(spellInfo, member, specInfo, keepHidden)
 
 		self.watching[spellInfo.spellID][member.GUID] = nil
 		member.watching[spellID] = nil
+		watchInfo.readyCountCLEU = 0
 
 		sendFrontEndRemove(watchInfo)
 	end
@@ -1273,7 +1326,7 @@ function ZT:sendHandshake(specInfo)
 	if timeSinceLastHandshake < self.timeBetweenHandshakes then
 		if not self.queuedHandshake then
 			self.queuedHandshake = true
-			C_Timer.After(self.timeBetweenHandshakes - timeSinceLastHandshake, function() self:sendHandshake() end)
+			C_Timer_After(self.timeBetweenHandshakes - timeSinceLastHandshake, function() self:sendHandshake() end)
 		end
 		return
 	end
@@ -1314,7 +1367,7 @@ function ZT:sendCDUpdate(watchInfo, ignoreRateLimit, wasQueued)
 					local timeSinceLastCDUpdate = (time - self.timeOfLastCDUpdate[spellID])
 					if timeSinceLastCDUpdate < self.timeBetweenCDUpdates then
 						self.queuedCDUpdates[spellID] = true
-						C_Timer.After(self.timeBetweenCDUpdates - timeSinceLastCDUpdate, function() self:sendCDUpdate(watchInfo, false, true) end)
+						C_Timer_After(self.timeBetweenCDUpdates - timeSinceLastCDUpdate, function() self:sendCDUpdate(watchInfo, false, true) end)
 						return -- Ignore since an update has now been queued
 					end
 				end

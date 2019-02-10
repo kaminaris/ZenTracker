@@ -25,6 +25,7 @@ local defaults = {
 	debugEvents = false,
 	debugMessages = false,
 	debugTracking = false,
+	debugCleu = false,
 };
 
 local function update(parent, spellInfo, data)
@@ -143,9 +144,14 @@ function ZT:RegisterOptions()
 	if self.db.debugTracking then debugTracking:SetChecked(true); end
 	debugTracking.OnValueChanged = function(_, flag) self.db.debugTracking = flag; end
 
+	local debugCleu = StdUi:Checkbox(optionsFrame, 'Debug CLEU');
+	if self.db.debugCleu then debugCleu:SetChecked(true); end
+	debugCleu.OnValueChanged = function(_, flag) self.db.debugCleu = flag; end
+
 	local scrollFrame = self:BuildOptionsFrame(optionsFrame);
 
-	optionsFrame:AddRow():AddElements(debugEvents, debugMessages, debugTracking, { column = 'even' });
+	optionsFrame:AddRow():AddElements(debugEvents, debugMessages, { column = 'even' });
+	optionsFrame:AddRow():AddElements(debugTracking, debugCleu, { column = 'even' });
 
 	optionsFrame:AddRow():AddElement(StdUi:Header(optionsFrame, 'Spell Blacklist'));
 

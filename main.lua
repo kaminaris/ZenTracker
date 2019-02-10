@@ -419,7 +419,7 @@ ZT.typeToTrackedSpells["DAMAGE"] = {
 	{spellID=19574, specs={Hunter.BM}, baseCD=90}, -- Bestial Wrath
 	{spellID=193530, specs={Hunter.BM}, baseCD=120}, -- Aspect of the Wild
 	{spellID=201430, specs={Hunter.BM}, baseCD=180, reqTalents={63}}, -- Stampede
-	{spellID=288613, specs={Hunter.MM}, baseCD=120}, -- Trueshot
+	{spellID=288613, specs={Hunter.MM}, baseCD=120, version=3}, -- Trueshot
 	{spellID=266779, specs={Hunter.SV}, baseCD=120}, -- Coordinated Assault
 	{spellID=12042, specs={Mage.Arcane}, baseCD=90}, -- Arcane Power
 	{spellID=190319, specs={Mage.Fire}, baseCD=120}, -- Combustion
@@ -630,6 +630,7 @@ local function sendFrontEndAdd(watchInfo)
 	if watchInfo.isHidden then
 		return
 	end
+
 	local spellInfo = watchInfo.spellInfo
 
 	if ZT.db.debugEvents then
@@ -745,6 +746,13 @@ end
 ZT.nextWatchID = 1
 ZT.watching = {}
 
+local function WatchInfo_handleReady(self, expiration)
+	if expiration == self.expiration then
+		sendFrontEndTrigger(self)
+		self.lastExpiration = expiration
+	end
+end
+
 local function WatchInfo_startReadyTimer(self, remaining)
 	if self.lastExpiration >= self.expiration then
 		return
@@ -806,12 +814,7 @@ local function WatchInfo_handleReady(self)
 	sendFrontEndTrigger(self)
 	ZT:sendCDUpdate(self, true)
 end
-local function WatchInfo_handleReady(self, expiration)
-	if expiration == self.expiration then
-		sendFrontEndTrigger(self)
-		self.lastExpiration = expiration
-	end
-end
+
 local function WatchInfo_hide(self)
 	sendFrontEndRemove(self)
 	self.isHidden = true
@@ -908,7 +911,6 @@ function ZT:watch(spellInfo, member, specInfo, isHidden)
 			isHidden = isHidden,
 			lastExpiration = time,
 			startCooldown = WatchInfo_startCooldown,
-			update = WatchInfo_update,
 			updateDelta = WatchInfo_updateDelta,
 			updateRemaining = WatchInfo_updateRemaining,
 		}

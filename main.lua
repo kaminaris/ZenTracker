@@ -788,15 +788,17 @@ local function WatchInfo_update(self, spellID, ignoreIfReady, ignoreRateLimit)
 	local startTime, duration, enabled = GetSpellCooldown(spellID)
 	if enabled ~= 0 then
 		if startTime ~= 0 then
+			ignoreRateLimit = ignoreRateLimit or (self.expiration < GetTime())
 			self.duration = duration
 			self.expiration = startTime + duration
 		else
+			ignoreRateLimit = true
 			self.expiration = GetTime()
 		end
 
 		if (not ignoreIfReady) or (startTime ~= 0) then
-			sendFrontEndTrigger(self)
 			ZT:sendCDUpdate(self, ignoreRateLimit)
+			sendFrontEndTrigger(self)
 		end
 	end
 end
@@ -1309,12 +1311,12 @@ ZT.timeOfLastCDUpdate = {}
 ZT.queuedCDUpdates = {}
 
 local function sendMessage(message)
-	if not IsInGroup() and not IsInRaid() then
-		return
+	if ZT.db.debugMessages then
+		print("[ZT] Sending Message '"..message.."'")
 	end
 
-	if ZT.DEBUG_MESSAGES then
-		print("[ZT] Sending Message '"..message.."'")
+	if not IsInGroup() and not IsInRaid() then
+		return
 	end
 
 	local channel = IsInGroup(2) and "INSTANCE_CHAT" or "RAID"

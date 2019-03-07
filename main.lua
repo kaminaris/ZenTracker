@@ -2,11 +2,46 @@ local addonName, ZT = ...;
 
 _G[addonName] = ZT;
 
-ZT.inspectLib = LibStub:GetLibrary("LibGroupInSpecT-1.1", true);
+-- Local versions of commonly used functions
+local ipairs = ipairs
+local pairs = pairs
+local print = print
+local select = select
+local tonumber = tonumber
 
--- Class/Spec ID List
-local DK = {ID=6, name="DEATHKNIGHT", Blood=250, Frost=251, Unholy=252}
+local IsInGroup = IsInGroup
+local IsInRaid = IsInRaid
+local UnitGUID = UnitGUID
+local GetTime = GetTime
+
+local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
+local C_ChatInfo_SendAddonMessage = C_ChatInfo.SendAddonMessage
+local C_Timer_After = C_Timer.After
+
+-- Turns on/off debugging messages
+local DEBUG_EVENT = { isEnabled = false, color = "FF2281F4" }
+local DEBUG_MESSAGE = { isEnabled = false, color = "FF11D825" }
+local DEBUG_TIMER = { isEnabled = false, color = "FFF96D27" }
+local DEBUG_TRACKING = { isEnabled = false, color = "FFA53BF7" }
+
+-- Turns on/off testing of combatlog-based tracking for the player
+-- (Note: This will disable sharing of player CD updates over addon messages)
+local TEST_CLEU = false
+
+local function prdebug(type, ...)
+	if type.isEnabled then
+		print("|c"..type.color.."[ZT-Debug]", ...)
+	end
+end
+
+local function prerror(...)
+	print("|cFFFF0000[ZT-Error]", ...)
+end
+
+--##############################################################################
+-- Class and Spec Information
 local DH = {ID=12, name="DEMONHUNTER", Havoc=577, Veng=581}
+local DK = {ID=6, name="DEATHKNIGHT", Blood=250, Frost=251, Unholy=252}
 local Druid = {ID=11, name="DRUID", Balance=102, Feral=103, Guardian=104, Resto=105}
 local Hunter = {ID=3, name="HUNTER", BM=253, MM=254, SV=255}
 local Mage = {ID=8, name="MAGE", Arcane=62, Fire=63, Frost=64}
@@ -19,26 +54,11 @@ local Warlock = {ID=9, name="WARLOCK", Affl=265, Demo=266, Destro=267}
 local Warrior = {ID=1, name="WARRIOR", Arms=71, Fury=72, Prot=73}
 
 local AllClasses = {
-	[DK.name] = DK, [DH.name] = DH, [Druid.name] = Druid, [Hunter.name] = Hunter,
+	[DH.name] = DH, [DK.name] = DK, [Druid.name] = Druid, [Hunter.name] = Hunter,
 	[Mage.name] = Mage, [Monk.name] = Monk, [Paladin.name] = Paladin,
 	[Priest.name] = Priest, [Rogue.name] = Rogue, [Shaman.name] = Shaman,
 	[Warlock.name] = Warlock, [Warrior.name] = Warrior
 }
-
--- Local versions of commonly used functions
-local ipairs = ipairs
-local pairs = pairs
-local print = print
-local select = select
-local tonumber = tonumber
-
-local IsInGroup = IsInGroup
-local IsInRaid = IsInRaid
-local GetTime = GetTime
-local UnitGUID = UnitGUID
-local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
-local C_ChatInfo_SendAddonMessage = C_ChatInfo.SendAddonMessage
-local C_Timer_After = C_Timer.After
 
 local IterateGroupMembers = function(reversed, forceParty)
 	local unit = (not forceParty and IsInRaid()) and 'raid' or 'party'
@@ -56,9 +76,9 @@ local IterateGroupMembers = function(reversed, forceParty)
 	end
 end
 
---------------------------------------------------------------------------------
--- BEGIN SPELL COOLDOWN MODIFIERS
---------------------------------------------------------------------------------
+
+--##############################################################################
+-- Spell Cooldown Modifiers
 
 local function StaticMod(type, value)
 	return { type = "Static", [type] = value }
@@ -77,7 +97,7 @@ local function EventDeltaMod(type, spellID, delta)
 		type = type,
 		spellID = spellID,
 		handler = function(watchInfo)
-			watchInfo:updateDelta(delta)
+			watchInfo:updateCDDelta(delta)
 		end
 	})
 end
@@ -91,7 +111,7 @@ local function EventRemainingMod(type, spellID, remaining)
 		type = type,
 		spellID = spellID,
 		handler = function(watchInfo)
-			watchInfo:updateRemaining(remaining)
+			watchInfo:updateCDRemaining(remaining)
 		end
 	})
 end
@@ -113,7 +133,7 @@ local modShockwave = DynamicMod({
 		handler = function(watchInfo)
 			watchInfo.numHits = watchInfo.numHits + 1
 			if watchInfo.numHits == 3 then
-				watchInfo:updateDelta(-15)
+				watchInfo:updateCDDelta(-15)
 			end
 		end
 	}
@@ -129,7 +149,7 @@ local modCapTotem = DynamicMod({
 			watchInfo.totemHandler = function(watchInfo)
 				watchInfo.numHits = watchInfo.numHits + 1
 				if watchInfo.numHits <= 4 then
-					watchInfo:updateDelta(-5)
+					watchInfo:updateCDDelta(-5)
 				end
 			end
 		end
@@ -156,7 +176,7 @@ local modGuardianSpirit = DynamicMod({
 		type = "SPELL_AURA_REMOVED", spellID = 47788,
 		handler = function(watchInfo)
 			if not watchInfo.spiritHeal then
-				watchInfo:updateRemaining(60)
+				watchInfo:updateCDRemaining(60)
 			end
 			watchInfo.spiritHeal = false
 		end
@@ -169,29 +189,54 @@ local function DispelMod(spellID)
 		type = "SPELL_DISPEL",
 		spellID = spellID,
 		handler = function(watchInfo)
-			watchInfo:updateRemaining(8)
+			watchInfo:updateCDRemaining(8)
 		end
 	})
 end
 
 -- Resource Spending: For every spender, reduce cooldown by (coefficient * cost) seconds
---   Note: By default, I use minimum cost values as to not over-estimate the cooldown reduction
+--   Note: By default, I try to use minimum cost values as to not over-estimate the cooldown reduction
 local specIDToSpenderInfo = {
-	[DK.Blood] = {resourceType="RUNIC_POWER", spells={[49998]=40, [61999]=30, [206940]=30}},
+	[DK.Blood] = {
+		[49998]  = 40, -- Death Strike (Assumes -5 from Ossuary)
+		[61999]  = 30, -- Raise Ally
+		[206940] = 30, -- Mark of Blood
+	},
+	[Warrior.Arms] = {
+		[845]    = 20, -- Cleave
+		[163201] = 20, -- Execute (Ignores Sudden Death)
+		[1715]   = 10, -- Hamstring
+		[202168] = 10, -- Impending Victory
+		[12294]  = 30, -- Moral Strike
+		[772]    = 30, -- Rend
+		[1464]   = 20, -- Slam
+		[1680]   = 30, -- Whirlwind
+	},
+	[Warrior.Fury] = {
+		[202168] = 10, -- Impending Victory
+		[184367] = 75, -- Rampage (Assumes -10 from Carnage)
+		[12323]  = 10, -- Piercing Howl
+	},
+	[Warrior.Prot] = {
+		[190456] = 40, -- Ignore Pain (Ignores Vengeance)
+		[202168] = 10, -- Impending Victory
+		[6572]   = 30, -- Revenge (Ignores Vengeance)
+		[2565]   = 30, -- Shield Block
+	}
 }
 
 local function ResourceSpendingMods(specID, coefficient)
 	local handlers = {}
 	local spenderInfo = specIDToSpenderInfo[specID]
 
-	for spellID,cost in pairs(spenderInfo.spells) do
+	for spellID,cost in pairs(spenderInfo) do
 		local delta = -(coefficient * cost)
 
 		handlers[#handlers+1] = {
 			type = "SPELL_CAST_SUCCESS",
 			spellID = spellID,
 			handler = function(watchInfo)
-				watchInfo:updateDelta(delta)
+				watchInfo:updateCDDelta(delta)
 			end
 		}
 	end
@@ -199,15 +244,10 @@ local function ResourceSpendingMods(specID, coefficient)
 	return DynamicMod(handlers)
 end
 
---------------------------------------------------------------------------------
--- END SPELL COOLDOWN MODIFIERS
---------------------------------------------------------------------------------
+--##############################################################################
+-- List of Tracked Spells
 
---------------------------------------------------------------------------------
--- BEGIN TRACKED SPELLS
---------------------------------------------------------------------------------
-
-ZT.spellsVersion = 5
+ZT.spellsVersion = 6
 ZT.typeToTrackedSpells = {}
 
 ZT.typeToTrackedSpells["INTERRUPT"] = {
@@ -234,8 +274,8 @@ ZT.typeToTrackedSpells["HARDCC"] = {
 	{spellID=192058, class=Shaman, baseCD=60, modTalents={[33]=modCapTotem}}, -- Capacitor Totem
 	{spellID=30283, class=Warlock, baseCD=60, modTalents={[51]=StaticMod("sub", 15)}}, -- Shadowfury
 	{spellID=46968, specs={Warrior.Prot}, baseCD=40, modTalents={[52]=modShockwave}}, -- Shockwave
-	{spellID=20549, race="Tauren", baseCD=90}, -- War Stomp
 	{spellID=255654, race="HighmountainTauren", baseCD=120}, -- Bull Rush
+	{spellID=20549, race="Tauren", baseCD=90}, -- War Stomp
 }
 
 ZT.typeToTrackedSpells["SOFTCC"] = {
@@ -250,20 +290,24 @@ ZT.typeToTrackedSpells["SOFTCC"] = {
 	{spellID=102793, specs={Druid.Guardian}, baseCD=60, reqTalents={22}}, -- Ursol's Vortex
 	{spellID=102793, specs={Druid.Resto}, baseCD=60}, -- Ursol's Vortex
 	{spellID=109248, class=Hunter, baseCD=30, reqTalents={53}}, -- Binding Shot
+	{spellID=122, class=Mage, baseCD=30, reqTalents={51,53}, mods=CastRemainingMod(235219,0), version=6}, -- Frost Nova
+	{spellID=122, class=Mage, baseCD=30, charges=2, reqTalents={52}, mods=CastRemainingMod(235219,0), version=6}, -- Frost Nova
+	{spellID=113724, class=Mage, baseCD=30, reqTalents={53}, version=6}, -- Ring of Frost
+	{spellID=31661, specs={Mage.Fire}, baseCD=20, version=2}, -- Dragon's Breath
+	{spellID=33395, specs={Mage.Frost}, baseCD=25, reqTalents={11,13}, version=6}, -- Freeze (Pet)
 	{spellID=116844, class=Monk, baseCD=45, reqTalents={43}}, -- Ring of Peace
 	{spellID=115750, class=Paladin, baseCD=90, reqTalents={33}, version=3}, -- Blinding Light
 	{spellID=8122, specs={Priest.Disc,Priest.Holy}, baseCD=60, modTalents={[41]=StaticMod("sub", 30)}}, -- Psychic Scream
-	{spellID=8122, specs={Priest.Shadow}, baseCD=60}, -- Psychic Scream
 	{spellID=204263, specs={Priest.Disc,Priest.Holy}, baseCD=45, reqTalents={43}}, -- Shining Force
+	{spellID=8122, specs={Priest.Shadow}, baseCD=60}, -- Psychic Scream
 	{spellID=51490, specs={Shaman.Ele}, baseCD=45}, -- Thunderstorm
-	{spellID=31661, specs={Mage.Fire}, baseCD=20, version=2}, -- Dragon's Breath
 }
 
 ZT.typeToTrackedSpells["STHARDCC"] = {
 	{spellID=211881, specs={DH.Havoc}, baseCD=30, reqTalents={63}}, -- Fel Eruption
 	{spellID=221562, specs={DK.Blood}, baseCD=45}, -- Asphyxiate
-	{spellID=108194, specs={DK.Unholy}, baseCD=45, reqTalents={33}}, -- Asphyxiate
 	{spellID=108194, specs={DK.FrostDK}, baseCD=45, reqTalents={32}}, -- Asphyxiate
+	{spellID=108194, specs={DK.Unholy}, baseCD=45, reqTalents={33}}, -- Asphyxiate
 	{spellID=5211, class=Druid, baseCD=50, reqTalents={41}}, -- Mighty Bash
 	{spellID=19577, specs={Hunter.BM,Hunter.Surv}, baseCD=60}, -- Intimidation
 	{spellID=853, specs={Paladin.Holy}, baseCD=60, modTalents={[31]=CastDeltaMod(275773, -10)}}, -- Hammer of Justice
@@ -272,22 +316,25 @@ ZT.typeToTrackedSpells["STHARDCC"] = {
 	{spellID=88625, specs={Priest.Holy}, baseCD=60, reqTalents={42}, mods=CastDeltaMod(585, -4), modTalents={[71]=CastDeltaMod(585, -1.333333)}}, -- Holy Word: Chastise
 	{spellID=64044, specs={Priest.Shadow}, baseCD=45, reqTalents={43}}, -- Psychic Horror
 	{spellID=6789, class=Warlock, baseCD=45, reqTalents={52}}, -- Mortal Coil
-	{spellID=107570, specs={Warrior.Prot}, baseCD=30, reqTalents={53}}, -- Storm Bolt
 	{spellID=107570, specs={Warrior.Arms,Warrior.Fury}, baseCD=30, reqTalents={23}}, -- Storm Bolt
+	{spellID=107570, specs={Warrior.Prot}, baseCD=30, reqTalents={53}}, -- Storm Bolt
 }
 
 ZT.typeToTrackedSpells["STSOFTCC"] = {
 	{spellID=217832, class=DH, baseCD=45}, -- Imprison
-	{spellID=2094, specs={Rogue.Sin,Rogue.Sub}, baseCD=120}, -- Blind
-	{spellID=2094, specs={Rogue.Outlaw}, baseCD=120, modTalents={[52]=StaticMod("sub", 30)}}, -- Blind
-	{spellID=115078, class=Monk, baseCD=45}, -- Paralysis
-	{spellID=187650, class=Hunter, baseCD=30}, -- Freezing Trap
 	{spellID=49576, specs={DK.Blood}, baseCD=15, version=2}, -- Death Grip
 	{spellID=49576, specs={DK.Frost,DK.Unholy}, baseCD=25, version=2}, -- Death Grip
+	{spellID=2094, specs={Rogue.Outlaw}, baseCD=120, modTalents={[52]=StaticMod("sub", 30)}}, -- Blind
+	{spellID=2094, specs={Rogue.Sin,Rogue.Sub}, baseCD=120}, -- Blind
+	{spellID=115078, class=Monk, baseCD=45}, -- Paralysis
+	{spellID=187650, class=Hunter, baseCD=30}, -- Freezing Trap
 	{spellID=107079, race="Pandaren", baseCD=120, version=4}, -- Quaking Palm
 }
 
 ZT.typeToTrackedSpells["DISPEL"] = {
+	{spellID=278326, class=DH, baseCD=10, version=6}, -- Consume Magic
+	{spellID=2908, class=Druid, baseCD=10, version=6}, -- Soothe
+	{spellID=32375, class=Priest, baseCD=45}, -- Mass Dispel
 	{spellID=202719, race="BloodElf", class=DH, baseCD=120}, -- Arcane Torrent
 	{spellID=50613, race="BloodElf", class=DK, baseCD=120}, -- Arcane Torrent
 	{spellID=80483, race="BloodElf", class=Hunter, baseCD=120}, -- Arcane Torrent
@@ -298,7 +345,6 @@ ZT.typeToTrackedSpells["DISPEL"] = {
 	{spellID=25046, race="BloodElf", class=Rogue, baseCD=120}, -- Arcane Torrent
 	{spellID=28730, race="BloodElf", class=Warlock, baseCD=120}, -- Arcane Torrent
 	{spellID=69179, race="BloodElf", class=Warrior, baseCD=120}, -- Arcane Torrent
-	{spellID=32375, class=Priest, baseCD=45}, -- Mass Dispel
 }
 
 ZT.typeToTrackedSpells["DEFMDISPEL"] = {
@@ -316,6 +362,7 @@ ZT.typeToTrackedSpells["EXTERNAL"] = {
 	{spellID=31821, specs={Paladin.Holy}, baseCD=180}, -- Aura Mastery
 	{spellID=6940, specs={Paladin.Holy,Paladin.Prot}, baseCD=120}, -- Blessing of Sacrifice
 	{spellID=1022, specs={Paladin.Holy,Paladin.Ret}, baseCD=300}, -- Blessing of Protection
+	{spellID=204150, specs={Paladin.Prot}, baseCD=180, reqTalents={63}, version=6}, -- Aegis of Light
 	{spellID=1022, specs={Paladin.Prot}, baseCD=300, reqTalents={41,42}}, -- Blessing of Protection
 	{spellID=204018, specs={Paladin.Prot}, baseCD=180, reqTalents={43}}, -- Blessing of Spellwarding
 	{spellID=62618, specs={Priest.Disc}, baseCD=180, reqTalents={71,73}}, -- Power Word: Barrier
@@ -327,13 +374,15 @@ ZT.typeToTrackedSpells["EXTERNAL"] = {
 }
 
 ZT.typeToTrackedSpells["HEALING"] = {
+	{spellID=33891, specs={Druid.Resto}, baseCD=180, reqTalents={53}, ignoreCast=true, mods=EventRemainingMod("SPELL_AURA_APPLIED",117679,180), version=6}, -- Incarnation: Tree of Life
 	{spellID=740, specs={Druid.Resto}, baseCD=180, modTalents={[61]=StaticMod("sub", 60)}}, -- Tranquility
+	{spellID=198664, specs={Monk.MW}, baseCD=180, reqTalents={63}, version=6}, -- Invoke Chi-Ji, the Red Crane
 	{spellID=115310, specs={Monk.MW}, baseCD=180}, -- Revival
 	{spellID=216331, specs={Paladin.Holy}, baseCD=120, reqTalents={62}}, -- Avenging Crusader
 	{spellID=105809, specs={Paladin.Holy}, baseCD=90, reqTalents={53}}, -- Holy Avenger
 	{spellID=633, specs={Paladin.Holy}, baseCD=600, modTalents={[21]=StaticMod("mul", 0.7)}}, -- Lay on Hands
 	{spellID=633, specs={Paladin.Prot,Paladin.Ret}, baseCD=600, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Lay on Hands
-	{spellID=210191, specs={Paladin.Ret}, baseCD=60, reqTalents={63}}, -- Word of Glory
+	{spellID=210191, specs={Paladin.Ret}, baseCD=60, charges=2, reqTalents={63}, version=6}, -- Word of Glory
 	{spellID=47536, specs={Priest.Disc}, baseCD=90}, -- Rapture
 	{spellID=246287, specs={Priest.Disc}, baseCD=90, reqTalents={73}}, -- Evangelism
 	{spellID=64843, specs={Priest.Holy}, baseCD=180}, -- Divine Hymn
@@ -348,50 +397,58 @@ ZT.typeToTrackedSpells["HEALING"] = {
 
 ZT.typeToTrackedSpells["UTILITY"] = {
 	{spellID=205636, specs={Druid.Balance}, baseCD=60, reqTalents={13}}, -- Force of Nature (Treants)
-	{spellID=73325, class=Priest, baseCD=90}, -- Leap of Faith
-	{spellID=114018, class=Rogue, baseCD=360}, -- Shroud of Concealment
 	{spellID=29166, specs={Druid.Balance,Druid.Resto}, baseCD=180}, -- Innervate
-	{spellID=64901, specs={Priest.Holy}, baseCD=300}, -- Symbol of Hope
-	{spellID=198103, class=Shaman, baseCD=300, version=2}, -- Earth Elemental
-	{spellID=192077, class=Shaman, baseCD=120, reqTalents={53}, version=2}, -- Wind Rush Totem
-	{spellID=106898, specs={Druid.Guardian}, baseCD=60, version=2}, -- Stampeding Roar
 	{spellID=106898, specs={Druid.Feral}, baseCD=120, version=2}, -- Stampeding Roar
+	{spellID=106898, specs={Druid.Guardian}, baseCD=60, version=2}, -- Stampeding Roar
+	{spellID=5384, class=Hunter, baseCD=30, version=6}, -- Feign Death
+	{spellID=116841, class=Monk, baseCD=30, reqTalents={23}, version=6}, -- Tiger's Lust
+	{spellID=1044, class=Paladin, baseCD=25, version=6}, -- Blessing of Freedom
+	{spellID=73325, class=Priest, baseCD=90}, -- Leap of Faith
+	{spellID=64901, specs={Priest.Holy}, baseCD=300}, -- Symbol of Hope
+	{spellID=114018, class=Rogue, baseCD=360}, -- Shroud of Concealment
+	{spellID=198103, class=Shaman, baseCD=300, version=2}, -- Earth Elemental
+	{spellID=8143, class=Shaman, baseCD=60, version=6}, -- Tremor Totem
+	{spellID=192077, class=Shaman, baseCD=120, reqTalents={53}, version=2}, -- Wind Rush Totem
 	{spellID=58984, race="NightElf", baseCD=120, version=3}, -- Shadowmeld
 }
 
 ZT.typeToTrackedSpells["PERSONAL"] = {
 	{spellID=198589, specs={DH.Havoc}, baseCD=60, mods=EventRemainingMod("SPELL_AURA_APPLIED", 212800, 60)}, -- Blur
 	{spellID=187827, specs={DH.Veng}, baseCD=180}, -- Metamorphosis
+	{spellID=48792, class=DK, baseCD=180}, -- Icebound Fortitude
 	{spellID=48707, specs={DK.Blood}, baseCD=60, modTalents={[42]=StaticMod("sub", 15)}}, -- Anti-Magic Shell
+	{spellID=55233, specs={DK.Blood}, baseCD=90, modTalents={[72]=ResourceSpendingMods(DK.Blood, 0.1)}}, -- Vampiric Blood
 	{spellID=48707, specs={DK.Frost,DK.Unholy}, baseCD=60}, -- Anti-Magic Shell
 	{spellID=48743, specs={DK.Frost,DK.Unholy}, baseCD=120, reqTalents={53}}, -- Death Pact
-	{spellID=48792, class=DK, baseCD=180}, -- Icebound Fortitude
-	{spellID=55233, specs={DK.Blood}, baseCD=90, modTalents={[72]=ResourceSpendingMods(DK.Blood, 0.1)}}, -- Vampiric Blood
 	{spellID=22812, specs={Druid.Balance,Druid.Guardian,Druid.Resto}, baseCD=60}, -- Barkskin
-	{spellID=61336, specs={Druid.Feral,Druid.Guardian}, baseCD=180}, -- Survival Instincts
+	{spellID=108238, specs={Druid.Balance,Druid.Feral,Druid.Resto}, baseCD=90, reqTalents={22}, version=6}, -- Renewal
+	{spellID=61336, specs={Druid.Feral,Druid.Guardian}, baseCD=180, charges=2, version=6}, -- Survival Instincts
 	{spellID=109304, class=Hunter, baseCD=120}, -- Exhilaration
 	{spellID=235219, specs={Mage.Frost}, baseCD=300}, -- Cold Snap
 	{spellID=122278, class=Monk, baseCD=120, reqTalents={53}}, -- Dampen Harm
-	{spellID=122783, specs={Monk.MW, Monk.WW}, baseCD=90, reqTalents={52}}, -- Diffuse Magic
+	{spellID=122281, specs={Monk.BRM}, baseCD=30, charges=2, reqTalents={52}, version=6}, -- Healing Elixir
 	{spellID=115203, specs={Monk.BRM}, baseCD=420}, -- Fortifying Brew
 	{spellID=115176, specs={Monk.BRM}, baseCD=300}, -- Zen Meditation
 	{spellID=243435, specs={Monk.MW}, baseCD=90}, -- Fortifying Brew
+	{spellID=122281, specs={Monk.MW}, baseCD=30, charges=2, reqTalents={51}, version=6}, -- Healing Elixir
+	{spellID=122783, specs={Monk.MW, Monk.WW}, baseCD=90, reqTalents={52}}, -- Diffuse Magic
 	{spellID=122470, specs={Monk.WW}, baseCD=90}, -- Touch of Karma
 	{spellID=498, specs={Paladin.Holy}, baseCD=60}, -- Divine Protection
-	{spellID=31850, specs={Paladin.Prot}, baseCD=120}, -- Ardent Defender
+	{spellID=31850, specs={Paladin.Prot}, baseCD=120, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Ardent Defender
 	{spellID=86659, specs={Paladin.Prot}, baseCD=300, version=5}, -- Guardian of the Ancient Kings
-	{spellID=184662, specs={Paladin.Ret}, baseCD=120}, -- Shield of Vengeance
+	{spellID=184662, specs={Paladin.Ret}, baseCD=120, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Shield of Vengeance
 	{spellID=205191, specs={Paladin.Ret}, baseCD=60, reqTalents={53}}, -- Eye for an Eye
 	{spellID=19236, specs={Priest.Disc, Priest.Holy}, baseCD=90}, -- Desperate Prayer
 	{spellID=47585, specs={Priest.Shadow}, baseCD=120}, -- Dispersion
-	{spellID=5277, specs={Rogue.Sin, Rogue.Sub}, baseCD=120, version=2}, -- Evasion
 	{spellID=199754, specs={Rogue.Outlaw}, baseCD=120, version=2}, -- Riposte
+	{spellID=5277, specs={Rogue.Sin, Rogue.Sub}, baseCD=120, version=2}, -- Evasion
 	{spellID=108271, class=Shaman, baseCD=90}, -- Astral Shift
+	{spellID=108416, class=Warlock, baseCD=60, reqTalents={33}, version=6}, -- Dark Pact
 	{spellID=104773, class=Warlock, baseCD=180}, -- Unending Resolve
 	{spellID=118038, specs={Warrior.Arms}, baseCD=180}, -- Die by the Sword
 	{spellID=184364, specs={Warrior.Fury}, baseCD=120}, -- Enraged Regeneration
-	{spellID=12975, specs={Warrior.Prot}, baseCD=180, modTalents={[43]=StaticMod("sub", 60)}}, -- Last Stand
-	{spellID=871, specs={Warrior.Prot}, baseCD=240}, -- Shield Wall
+	{spellID=12975, specs={Warrior.Prot}, baseCD=180, modTalents={[43]=StaticMod("sub", 60), [71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Last Stand
+	{spellID=871, specs={Warrior.Prot}, baseCD=240, modTalents={[71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Shield Wall
 }
 
 ZT.typeToTrackedSpells["IMMUNITY"] = {
@@ -399,7 +456,8 @@ ZT.typeToTrackedSpells["IMMUNITY"] = {
 	{spellID=186265, class=Hunter, baseCD=180, modTalents={[51]=StaticMod("mul", 0.8)}}, -- Aspect of the Turtle
 	{spellID=45438, specs={Mage.Arcane,Mage.Fire}, baseCD=240}, -- Ice Block
 	{spellID=45438, specs={Mage.Frost}, baseCD=240, mods=CastRemainingMod(235219, 0)}, -- Ice Block
-	{spellID=642, class=Paladin, baseCD=300}, -- Divine Shield
+	{spellID=642, specs={Paladin.Holy}, baseCD=300, modTalents={[21]=StaticMod("mul", 0.7)}}, -- Divine Shield
+	{spellID=642, specs={Paladin.Prot, Paladin.Ret}, baseCD=300, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Divine Shield
 	{spellID=31224, class=Rogue, baseCD=120}, -- Cloak of Shadows
 }
 
@@ -407,59 +465,72 @@ ZT.typeToTrackedSpells["DAMAGE"] = {
 	{spellID=191427, specs={DH.Havoc}, baseCD=240}, -- Metamorphosis
 	{spellID=258925, specs={DH.Havoc}, baseCD=60, reqTalents={33}}, -- Fel Barrage
 	{spellID=206491, specs={DH.Havoc}, baseCD=120, reqTalents={73}}, -- Nemesis
+	{spellID=47568, specs={DK.Frost}, baseCD=120, version=6}, -- Empower Rune Weapon
 	{spellID=279302, specs={DK.Frost}, baseCD=180, reqTalents={63}}, -- Frostwyrm's Fury
 	{spellID=152279, specs={DK.Frost}, baseCD=120, reqTalents={73}}, -- Breath of Sindragosaa
-	{spellID=42650, specs={DK.Unholy}, baseCD=480}, -- Army of the Dead
+	{spellID=275699, specs={DK.Unholy}, baseCD=90, modTalents={[71]={CastDeltaMod(47541,-1), CastDeltaMod(207317,-1)}}, version=6}, -- Apocalypse
+	{spellID=42650, specs={DK.Unholy}, baseCD=480, modTalents={[71]={CastDeltaMod(47541,-5), CastDeltaMod(207317,-5)}}}, -- Army of the Dead
 	{spellID=49206, specs={DK.Unholy}, baseCD=180, reqTalents={73}}, -- Summon Gargoyle
 	{spellID=207289, specs={DK.Unholy}, baseCD=75, reqTalents={72}}, -- Unholy Frenzy
 	{spellID=194223, specs={Druid.Balance}, baseCD=180, reqTalents={51,52}}, -- Celestial Alignment
+	{spellID=202770, specs={Druid.Balance}, baseCD=60, reqTalents={72}, version=6}, -- Fury of Elune
 	{spellID=102560, specs={Druid.Balance}, baseCD=180, reqTalents={53}}, -- Incarnation: Chosen of Elune
 	{spellID=106951, specs={Druid.Feral}, baseCD=180, version=3}, -- Berserk
 	{spellID=102543, specs={Druid.Feral}, baseCD=180, reqTalents={53}}, -- Incarnation: King of the Jungle
-	{spellID=19574, specs={Hunter.BM}, baseCD=90}, -- Bestial Wrath
+	{spellID=19574, specs={Hunter.BM}, baseCD=90, mods=CastDeltaMod(217200,-12)}, -- Bestial Wrath
 	{spellID=193530, specs={Hunter.BM}, baseCD=120}, -- Aspect of the Wild
 	{spellID=201430, specs={Hunter.BM}, baseCD=180, reqTalents={63}}, -- Stampede
 	{spellID=288613, specs={Hunter.MM}, baseCD=120, version=3}, -- Trueshot
 	{spellID=266779, specs={Hunter.SV}, baseCD=120}, -- Coordinated Assault
+	{spellID=55342, class=Mage, baseCD=120, reqTalents={32}}, -- Mirror Image
 	{spellID=12042, specs={Mage.Arcane}, baseCD=90}, -- Arcane Power
 	{spellID=190319, specs={Mage.Fire}, baseCD=120}, -- Combustion
 	{spellID=12472, specs={Mage.Frost}, baseCD=180}, -- Icy Veins
-	{spellID=55342, class=Mage, baseCD=120, reqTalents={32}}, -- Mirror Image
 	{spellID=115080, specs={Monk.WW}, baseCD=120}, -- Touch of Death
-	{spellID=123904, specs={Monk.WW}, baseCD=180, reqTalents={63}}, -- Xuen
-	{spellID=137639, specs={Monk.WW}, baseCD=90, reqTalents={71, 72}}, -- Storm, Earth, and Fire
+	{spellID=123904, specs={Monk.WW}, baseCD=180, reqTalents={63}}, -- Invoke Xuen, the White Tiger
+	{spellID=137639, specs={Monk.WW}, baseCD=90, charges=2, reqTalents={71, 72}, version=6}, -- Storm, Earth, and Fire
 	{spellID=152173, specs={Monk.WW}, baseCD=90, reqTalents={73}}, -- Serenity
+	{spellID=152262, specs={Paladin.Prot}, baseCD=45, reqTalents={73}, version=6}, -- Seraphim
+	{spellID=31884, specs={Paladin.Prot}, baseCD=120, version=6}, -- Avenging Wrath
 	{spellID=31884, specs={Paladin.Ret}, baseCD=120, reqTalents={71,73}}, -- Avenging Wrath
 	{spellID=231895, specs={Paladin.Ret}, baseCD=120, reqTalents={72}}, -- Crusade
 	{spellID=280711, specs={Priest.Shadow}, baseCD=60, reqTalents={72}}, -- Dark Ascension
 	{spellID=193223, specs={Priest.Shadow}, baseCD=180, reqTalents={73}}, -- Surrender to Madness
-	{spellID=79140, specs={Rogue.Sin}, baseCD=120}, -- Vendetta
-	{spellID=121471, specs={Rogue.Sub}, baseCD=180}, -- Shadow Blades
 	{spellID=13750, specs={Rogue.Outlaw}, baseCD=180}, -- Adrenaline Rush
 	{spellID=51690, specs={Rogue.Outlaw}, baseCD=120, reqTalents={73}}, -- Killing Spree
+	{spellID=79140, specs={Rogue.Sin}, baseCD=120}, -- Vendetta
+	{spellID=121471, specs={Rogue.Sub}, baseCD=180}, -- Shadow Blades
 	{spellID=114050, specs={Shaman.Ele}, baseCD=180, reqTalents={73}}, -- Ascendance
 	{spellID=192249, specs={Shaman.Ele}, baseCD=150, reqTalents={42}, version=3}, -- Storm Elemental
 	{spellID=191634, specs={Shaman.Ele}, baseCD=60, reqTalents={72}, version=3}, -- Stormkeeper
 	{spellID=114051, specs={Shaman.Enh}, baseCD=180, reqTalents={73}}, -- Ascendance
+	{spellID=51533, specs={Shaman.Enh}, baseCD=180, modTalents={[71]=StaticMod("sub", 30)}, version=6}, -- Feral Spirit
 	{spellID=205180, specs={Warlock.Affl}, baseCD=180}, -- Summon Darkglare
 	{spellID=113860, specs={Warlock.Affl}, baseCD=120, reqTalents={73}}, -- Dark Soul: Misery
 	{spellID=265187, specs={Warlock.Demo}, baseCD=90}, -- Summon Demonic Tyrant
 	{spellID=267217, specs={Warlock.Demo}, baseCD=180, reqTalents={73}}, -- Nether Portal
 	{spellID=113858, specs={Warlock.Destro}, baseCD=120, reqTalents={73}}, -- Dark Soul: Instability
 	{spellID=1122, specs={Warlock.Destro}, baseCD=180}, -- Summon Infernal
-	{spellID=227847, specs={Warrior.Arms}, baseCD=90}, -- Bladestorm
+	{spellID=227847, specs={Warrior.Arms}, baseCD=90, modTalents={[71]=ResourceSpendingMods(Warrior.Arms, 0.05)}}, -- Bladestorm
 	{spellID=107574, specs={Warrior.Arms}, baseCD=120, reqTalents={62}}, -- Avatar
-	{spellID=1719, specs={Warrior.Fury}, baseCD=90}, -- Recklessness
+	{spellID=1719, specs={Warrior.Fury}, baseCD=90, modTalents={[72]=ResourceSpendingMods(Warrior.Fury, 0.05)}}, -- Recklessness
 	{spellID=46924, specs={Warrior.Fury}, baseCD=60, reqTalents={63}}, -- Bladestorm
+	{spellID=107574, specs={Warrior.Prot}, baseCD=120, reqTalents={62}, modTalents={[71]=ResourceSpendingMods(Warrior.Prot, 0.1)}, version=6}, -- Avatar
 }
 
 ZT.typeToTrackedSpells["TANK"] = {
+	{spellID=206931, specs={DK.Blood}, baseCD=30, reqTalents={43}, version=6}, -- Blooddrinker
+	{spellID=274156, specs={DK.Blood}, baseCD=45, reqTalents={43}, version=6}, -- Consumption
 	{spellID=49028, specs={DK.Blood}, baseCD=120}, -- Dancing Rune Weapon
-	{spellID=194679, specs={DK.Blood}, baseCD=25, reqTalents={43}}, -- Rune Tap
+	{spellID=194679, specs={DK.Blood}, baseCD=25, charges=2, reqTalents={43}, version=6}, -- Rune Tap
 	{spellID=194844, specs={DK.Blood}, baseCD=60, reqTalents={73}}, -- Bonestorm
+	{spellID=212084, specs={DH.Veng}, baseCD=60, reqTalents={63}, version=6}, -- Fel Devastation
 	{spellID=204021, specs={DH.Veng}, baseCD=60}, -- Fiery Brand
+	{spellID=102558, specs={Druid.Guardian}, baseCD=180, reqTalents={53}, version=6}, -- Incarnation: Guardian of Ursoc
 	{spellID=132578, specs={Monk.BRM}, baseCD=180, reqTalents={63}, version=4}, -- Invoke Niuzao
-	{spellID=1160, specs={Warrior.Prot}, baseCD=45}, -- Demoralizing Shout
+	{spellID=1160, specs={Warrior.Prot}, baseCD=45, modTalents={[71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Demoralizing Shout
+	{spellID=228920, specs={Warrior.Prot}, baseCD=60, reqTalents={73}, version=6}, -- Ravager
+	{spellID=23920, specs={Warrior.Prot}, baseCD=25, version=6}, -- Spell Reflection
 }
 
 ZT.linkedSpellIDs = {
@@ -474,7 +545,7 @@ ZT.separateLinkedSpellIDs = {
 	[86659] = {212641}, -- Guardian of the Ancient Kings (+Glyph)
 }
 
-ZT.specialConfigSpellIDs = {
+ZT.sharedConfigSpellIDs = {
 	[202719] = "ArcaneTorrent",
 	[50613]  = "ArcaneTorrent",
 	[80483]  = "ArcaneTorrent",
@@ -491,8 +562,93 @@ ZT.specialConfigSpellIDs = {
 	[199754] = "Evasion/Riposte",
 	[114050] = "Ascendance",
 	[114051] = "Ascendance",
+	[227847] = "Bladestorm",
+	[46924]  = "Bladestorm",
 }
 
+--##############################################################################
+-- Handling custom spells specified by the user in the configuration
+
+local spellConfigFuncHeader = "return function(DK,DH,Druid,Hunter,Mage,Monk,Paladin,Priest,Rogue,Shaman,Warlock,Warrior,StaticMod,DynamicMod,EventDeltaMod,CastDeltaMod,EventRemainingMod,CastRemainingMod,DispelMod)"
+
+local function trim(s) -- From PiL2 20.4
+	return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+local function addCustomSpell(spellConfig, i)
+	if not spellConfig or type(spellConfig) ~= "table" then
+		prerror("Custom Spell", i, "is not represented as a valid table")
+		return
+	end
+
+	if type(spellConfig.type) ~= "string" then
+		prerror("Custom Spell", i, "does not have a valid 'type' entry")
+		return
+	end
+
+	if type(spellConfig.spellID) ~= "number" then
+		prerror("Custom Spell", i, "does not have a valid 'spellID' entry")
+		return
+	end
+
+	if type(spellConfig.baseCD) ~= "number" then
+		prerror("Custom Spell", i, "does not have a valid 'baseCD' entry")
+		return
+	end
+
+	spellConfig.version = 10000
+	spellConfig.isCustom = true
+
+	local spells = ZT.typeToTrackedSpells[spellConfig.type]
+	spells[#spells + 1] = spellConfig
+end
+--[[
+for i = 1,16 do
+	local spellConfig = ZT.config["custom"..i]
+	if spellConfig then
+		spellConfig = trim(spellConfig)
+
+		if spellConfig ~= "" then
+			local spellConfigFuncStr = spellConfigFuncHeader.." return "..spellConfig.." end"
+			local spellConfigFunc = WeakAuras.LoadFunction(spellConfigFuncStr, "ZenTracker Custom Spell "..i)
+			if spellConfigFunc then
+				local spellConfig = spellConfigFunc(DK,DH,Druid,Hunter,Mage,Monk,Paladin,Priest,Rogue,Shaman,Warlock,Warrior,
+					StaticMod,DynamicMod,EventDeltaMod,CastDeltaMod,EventRemainingMod,CastRemainingMod,DispelMod)
+				addCustomSpell(spellConfig, i)
+			end
+		end
+	end
+end
+--]]
+
+--##############################################################################
+-- Compiling the complete list of tracked spells
+
+ZT.spellIDToInfo = {}
+
+local function isSpellBlacklisted(spellInfo)
+	local spellID = spellInfo.spellID
+	local usingBlacklist = (ZT.config["spellConfigType"] == 1)
+	local isBlacklisted = ZT.config["spell"..spellID]
+
+	if isBlacklisted == nil then
+		local configSpellID = ZT.sharedConfigSpellIDs[spellID]
+		if configSpellID then
+			isBlacklisted = ZT.config["spell"..configSpellID]
+		else
+			isBlacklisted = (not usingBlacklist)
+			if not spellInfo.isCustom then
+				prerror("Config not present for spellID", spellID)
+			end
+		end
+	end
+
+	if not usingBlacklist then
+		isBlacklisted = not isBlacklisted
+	end
+
+	return isBlacklisted
+end
 -- Building a complete list of tracked spells
 function ZT:BuildSpellList()
 	self.spellIDToInfo = {}
@@ -515,41 +671,33 @@ function ZT:BuildSpellList()
 				spellInfo.specs = specsMap
 			end
 
-			-- Placing single modifiers inside of a table (or creating an empty table if none)
-			if spellInfo.mods then
-				if spellInfo.mods.type then
-					spellInfo.mods = { spellInfo.mods }
-				end
-			else
+			-- Placing single modifiers inside of a array (or creating an empty array if none)
+			if not spellInfo.mods then
 				spellInfo.mods = {}
+			elseif not spellInfo.mods[1] then
+				spellInfo.mods = { spellInfo.mods }
 			end
 
-			-- Placing single talent modifiers inside of a table (or creating an empty table if none)
-			if spellInfo.modTalents then
+			-- Placing single talent modifiers inside of a array (or creating an empty array if none)
+			if not spellInfo.modTalents then
+				spellInfo.modTalents = {}
+			else
 				for talent,modifiers in pairs(spellInfo.modTalents) do
-					if modifiers.type then
+					if not modifiers[1] then
 						spellInfo.modTalents[talent] = { modifiers }
 					end
 				end
-			else
-				spellInfo.modTalents = {}
 			end
 
 			local spellID = spellInfo.spellID
-			local allSpellInfo = self.spellIDToInfo[spellID]
+			local allSpellInfo = ZT.spellIDToInfo[spellID]
 			if not allSpellInfo then
-				-- Checking if this spellID is blacklisted
-				local spellName = GetSpellInfo(spellID);
-				spellName = spellName:gsub('%s+', '');
-
-				local isBlacklisted = self.db.blacklist[spellName];
-
 				allSpellInfo = {
 					type = type,
 					variants = { spellInfo },
-					isBlacklisted = isBlacklisted,
+					isBlacklisted = isSpellBlacklisted(spellInfo),
 				}
-				self.spellIDToInfo[spellID] = allSpellInfo
+				ZT.spellIDToInfo[spellID] = allSpellInfo
 			else
 				local variants = allSpellInfo.variants
 				variants[#variants+1] = spellInfo
@@ -557,110 +705,16 @@ function ZT:BuildSpellList()
 		end
 	end
 end
+--##############################################################################
+-- Handling combatlog and WeakAura events by invoking specified callbacks
 
--- Adding custom spells from the user to the table
-local spellConfigFuncHeader = "return function(DK,DH,Druid,Hunter,Mage,Monk,Paladin,Priest,Rogue,Shaman,Warlock,Warrior,StaticMod,DynamicMod,EventDeltaMod,CastDeltaMod,EventRemainingMod,CastRemainingMod,DispelMod)"
+ZT.eventHandlers = { handlers = {} }
 
-local function trim(s) -- From PiL2 20.4
-	return (s:gsub("^%s*(.-)%s*$", "%1"))
-end
-
-local function addCustomSpell(spellConfig, i)
-	if not spellConfig or type(spellConfig) ~= "table" then
-		print("[ZT] Custom Spell", i, "is not represented as a valid table")
-		return
-	end
-
-	if type(spellConfig.type) ~= "string" then
-		print("[ZT] Custom Spell", i, "does not have a valid 'type' entry")
-		return
-	end
-
-	if type(spellConfig.spellID) ~= "number" then
-		print("[ZT] Custom Spell", i, "does not have a valid 'spellID' entry")
-		return
-	end
-
-	if type(spellConfig.baseCD) ~= "number" then
-		print("[ZT] Custom Spell", i, "does not have a valid 'baseCD' entry")
-		return
-	end
-
-	spellConfig.version = 10000
-	spellConfig.isCustom = true
-
-	local spells = ZT.typeToTrackedSpells[spellConfig.type]
-	spells[#spells + 1] = spellConfig
-end
-
---for i = 1,11 do
---	local spellConfig = ZT.config["custom"..i]
---	if spellConfig then
---		spellConfig = trim(spellConfig)
---	end
---
---	if spellConfig and spellConfig ~= "" then
---		local spellConfigFuncStr = spellConfigFuncHeader.." return "..spellConfig.." end"
---		local spellConfigFunc = WeakAuras.LoadFunction(spellConfigFuncStr, "ZenTracker Custom Spell "..i)
---		if spellConfigFunc then
---			local spellConfig = spellConfigFunc(DK,DH,Druid,Hunter,Mage,Monk,Paladin,Priest,Rogue,Shaman,Warlock,Warrior,
---					StaticMod,DynamicMod,EventDeltaMod,CastDeltaMod,EventRemainingMod,CastRemainingMod,DispelMod)
---			addCustomSpell(spellConfig, i)
---		end
---	end
---end
-
---------------------------------------------------------------------------------
--- END TRACKED SPELLS
---------------------------------------------------------------------------------
-
--- Handling the sending of events to the front-end WAs
-local function sendFrontEndTrigger(watchInfo)
-	if watchInfo.isHidden then
-		return
-	end
-
-	if ZT.db.debugEvents then
-		print("[ZT] Sending ZT_TRIGGER", watchInfo.spellInfo.type, watchInfo.watchID, watchInfo.duration, watchInfo.expiration)
-	end
-	WeakAuras.ScanEvents("ZT_TRIGGER", watchInfo.spellInfo.type, watchInfo.watchID, watchInfo.duration, watchInfo.expiration)
-end
-
-local function sendFrontEndAdd(watchInfo)
-	if watchInfo.isHidden then
-		return
-	end
-
-	local spellInfo = watchInfo.spellInfo
-
-	if ZT.db.debugEvents then
-		print("[ZT] Sending ZT_ADD", spellInfo.type, watchInfo.watchID, watchInfo.member.name, spellInfo.spellID, watchInfo.duration)
-	end
-	WeakAuras.ScanEvents("ZT_ADD", spellInfo.type, watchInfo.watchID, watchInfo.member, spellInfo.spellID, watchInfo.duration)
-
-	if watchInfo.expiration > GetTime() then
-		sendFrontEndTrigger(watchInfo)
-	end
-end
-
-local function sendFrontEndRemove(watchInfo)
-	if watchInfo.isHidden then
-		return
-	end
-	if ZT.db.debugEvents then
-		print("[ZT] Sending ZT_REMOVE", watchInfo.spellInfo.type, watchInfo.watchID)
-	end
-	WeakAuras.ScanEvents("ZT_REMOVE", watchInfo.spellInfo.type, watchInfo.watchID)
-end
-
--- Handling combatlog and WeakAura events by invoking specified handler functions
-ZT.eventHandlers = {}
-
-function ZT:addEventHandler(type, spellID, sourceGUID, handler, data)
-	local types = self.eventHandlers[spellID]
+function ZT.eventHandlers:add(type, spellID, sourceGUID, func, data)
+	local types = self.handlers[spellID]
 	if not types then
 		types = {}
-		self.eventHandlers[spellID] = types
+		self.handlers[spellID] = types
 	end
 
 	local sources = types[type]
@@ -675,23 +729,23 @@ function ZT:addEventHandler(type, spellID, sourceGUID, handler, data)
 		sources[sourceGUID] = handlers
 	end
 
-	handlers[handler] = data
+	handlers[func] = data
 end
 
-function ZT:removeEventHandler(type, spellID, sourceGUID, handler)
-	local types = self.eventHandlers[spellID]
+function ZT.eventHandlers:remove(type, spellID, sourceGUID, func)
+	local types = self.handlers[spellID]
 	if types then
 		local sources = types[type]
 		if sources then
 			local handlers = sources[sourceGUID]
 			if handlers then
-				handlers[handler] = nil
+				handlers[func] = nil
 			end
 		end
 	end
 end
 
-function ZT:removeAllEventHandlers(sourceGUID)
+function ZT.eventHandlers:removeAll(sourceGUID)
 	for _,spells in pairs(self.eventHandlers) do
 		for _,sources in pairs(spells) do
 			for GUID,handlers in pairs(sources) do
@@ -717,8 +771,8 @@ local function fixSourceGUID(sourceGUID) -- Based on https://wago.io/p/Nnogga
 	return sourceGUID
 end
 
-function ZT:handleEvent(type, spellID, sourceGUID)
-	local types = self.eventHandlers[spellID]
+function ZT.eventHandlers:handle(type, spellID, sourceGUID)
+	local types = self.handlers[spellID]
 	if not types then
 		return
 	end
@@ -737,58 +791,375 @@ function ZT:handleEvent(type, spellID, sourceGUID)
 		end
 	end
 
-	for handler,data in pairs(handlers) do
-		handler(data, spellID)
+	for func,data in pairs(handlers) do
+		func(data, spellID)
 	end
 end
 
--- Managing the set of (spellID,sourceGUID) pairs that are being watched
-ZT.nextWatchID = 1
-ZT.watching = {}
+--##############################################################################
+-- Managing timer callbacks in a way that allows for updates/removals
 
-local function WatchInfo_handleReadyTimer(self, expiration)
-	if expiration == self.expiration then
-		sendFrontEndTrigger(self)
-		self.lastExpiration = expiration
+ZT.timers = { heap={}, callbackTimes={} }
+
+function ZT.timers:fixHeapUpwards(index)
+	local heap = self.heap
+	local timer = heap[index]
+
+	local parentIndex, parentTimer
+	while index > 1 do
+		parentIndex = floor(index / 2)
+		parentTimer = heap[parentIndex]
+		if timer.time >= parentTimer.time then
+			break
+		end
+
+		parentTimer.index = index
+		heap[index] = parentTimer
+		index = parentIndex
+	end
+
+	if timer.index ~= index then
+		timer.index = index
+		heap[index] = timer
 	end
 end
 
-local function WatchInfo_startReadyTimer(self, remaining)
-	if self.lastExpiration >= self.expiration then
+function ZT.timers:fixHeapDownwards(index)
+	local heap = self.heap
+	local timer = heap[index]
+
+	local childIndex, minChildTimer, leftChildTimer, rightChildTimer
+	while true do
+		childIndex = 2 * index
+
+		leftChildTimer = heap[childIndex]
+		if leftChildTimer then
+			rightChildTimer = heap[childIndex + 1]
+			if rightChildTimer and (rightChildTimer.time < leftChildTimer.time) then
+				minChildTimer = rightChildTimer
+			else
+				minChildTimer = leftChildTimer
+			end
+		else
+			break
+		end
+
+		if timer.time <= minChildTimer.time then
+			break
+		end
+
+		childIndex = minChildTimer.index
+		minChildTimer.index = index
+		heap[index] = minChildTimer
+		index = childIndex
+	end
+
+	if timer.index ~= index then
+		timer.index = index
+		heap[index] = timer
+	end
+end
+
+function ZT.timers:setupCallback()
+	local minTimer = self.heap[1]
+	if minTimer then
+		local timeNow = GetTime()
+		local remaining = minTimer.time - timeNow
+		if remaining <= 0 then
+			self:handle()
+		elseif not self.callbackTimes[minTimer.time] then
+			for time,_ in pairs(self.callbackTimes) do
+				if time < timeNow then
+					self.callbackTimes[time] = nil
+				end
+			end
+			self.callbackTimes[minTimer.time] = true
+
+			-- Note: This 0.001 avoids early callbacks that I ran into
+			remaining = remaining + 0.001
+			prdebug(DEBUG_TIMER, "Setting callback for handling timers after", remaining, "seconds")
+			C_Timer.After(remaining, function() self:handle() end)
+		end
+	end
+end
+
+function ZT.timers:handle()
+	local timeNow = GetTime()
+	local heap = self.heap
+	local minTimer = heap[1]
+
+	prdebug(DEBUG_TIMER, "Handling timers at time", timeNow, "( Min @", minTimer and minTimer.time or "NONE", ")")
+	while minTimer and minTimer.time <= timeNow do
+		local heapSize = #heap
+		if heapSize > 1 then
+			heap[1] = heap[heapSize]
+			heap[1].index = 1
+			heap[heapSize] = nil
+			self:fixHeapDownwards(1)
+		else
+			heap[1] = nil
+		end
+
+		minTimer.index = -1
+		minTimer.callback()
+
+		minTimer = heap[1]
+	end
+
+	self:setupCallback()
+end
+
+function ZT.timers:add(time, callback)
+	local heap = self.heap
+
+	local index = #heap + 1
+	local timer = {time=time, callback=callback, index=index}
+	heap[index] = timer
+
+	self:fixHeapUpwards(index)
+	self:setupCallback()
+
+	return timer
+end
+
+function ZT.timers:cancel(timer)
+	local index = timer.index
+	if index == -1 then
 		return
 	end
 
-	if remaining > 0 then
-		local expiration = self.expiration
-		C_Timer_After(remaining, function() WatchInfo_handleReadyTimer(self, expiration) end)
+	timer.index = -1
+
+	local heap = self.heap
+	local heapSize = #heap
+	if heapSize ~= index then
+		heap[index] = heap[heapSize]
+		heap[index].index = index
+		heap[heapSize] = nil
+		self:fixHeapDownwards(index)
+		self:setupCallback()
 	else
-		WatchInfo_handleReadyTimer(self, self.expiration)
+		heap[index] = nil
 	end
 end
 
-local function WatchInfo_startCooldown(self)
-	self.expiration = GetTime() + self.duration
-	sendFrontEndTrigger(self)
-	WatchInfo_startReadyTimer(self, self.duration)
+function ZT.timers:update(timer, time)
+	local heap = self.heap
+
+	local fixHeapFunc = (time <= timer.time) and self.fixHeapUpwards or self.fixHeapDownwards
+	timer.time = time
+
+	fixHeapFunc(self, timer.index)
+	self:setupCallback()
 end
 
-local function WatchInfo_updateDelta(self, delta)
+--##############################################################################
+-- Managing the set of <spell, member> pairs that are being watched
+
+local WatchInfo = { nextID = 1 }
+local WatchInfoMT = { __index = WatchInfo }
+
+ZT.watching = {}
+
+function WatchInfo:create(member, spellInfo, isHidden)
+	local watchInfo = {
+		watchID = self.nextID,
+		member = member,
+		spellInfo = spellInfo,
+		duration = member:calcSpellCooldown(spellInfo, specInfo),
+		expiration = GetTime(),
+		charges = spellInfo.charges,
+		isHidden = isHidden,
+		ignoreSharing = false,
+	}
+	self.nextID = self.nextID + 1
+
+	watchInfo = setmetatable(watchInfo, WatchInfoMT)
+	return watchInfo
+end
+
+function WatchInfo:updateSpellInfo(spellInfo, specInfo)
+	self.spellInfo = spellInfo
+	self.charges = spellInfo.charges
+	self.duration = self.member:calcSpellCooldown(spellInfo, specInfo)
+end
+
+function WatchInfo:sendAddEvent()
+	if not self.isHidden then
+		local spellInfo = self.spellInfo
+		prdebug(DEBUG_EVENT, "Sending ZT_ADD", spellInfo.type, self.watchID, self.member.name, spellInfo.spellID, self.duration, self.charges)
+		WeakAuras.ScanEvents("ZT_ADD", spellInfo.type, self.watchID, self.member, spellInfo.spellID, self.duration, self.charges)
+
+		if self.expiration > GetTime() then
+			self:sendTriggerEvent()
+		end
+	end
+end
+
+function WatchInfo:sendTriggerEvent()
+	if not self.isHidden then
+		prdebug(DEBUG_EVENT, "Sending ZT_TRIGGER", self.spellInfo.type, self.watchID, self.duration, self.expiration, self.charges)
+		WeakAuras.ScanEvents("ZT_TRIGGER", self.spellInfo.type, self.watchID, self.duration, self.expiration, self.charges)
+	end
+end
+
+function WatchInfo:sendRemoveEvent()
+	if not self.isHidden then
+		prdebug(DEBUG_EVENT, "Sending ZT_REMOVE", self.spellInfo.type, self.watchID)
+		WeakAuras.ScanEvents("ZT_REMOVE", self.spellInfo.type, self.watchID)
+	end
+end
+
+function WatchInfo:hide()
+	if not self.isHidden then
+		self:sendRemoveEvent()
+		self.isHidden = true
+	end
+end
+
+function WatchInfo:unhide()
+	if self.isHidden then
+		self.isHidden = false
+		self:sendAddEvent()
+	end
+end
+
+function WatchInfo:toggleHidden(toggle)
+	if toggle then
+		self:hide()
+	else
+		self:unhide()
+	end
+end
+
+function WatchInfo:handleReadyTimer()
+	if self.charges then
+		self.charges = self.charges + 1
+
+		-- If we are not at max charges, update expiration and start a ready timer
+		if self.charges < self.spellInfo.charges then
+			self.expiration = self.expiration + self.duration
+			prdebug(DEBUG_TIMER, "Adding ready timer of", self.expiration, "for spellID", self.spellInfo.spellID)
+			self.readyTimer = ZT.timers:add(self.expiration, function() self:handleReadyTimer() end)
+		else
+			self.readyTimer = nil
+		end
+	else
+		self.readyTimer = nil
+	end
+
+	self:sendTriggerEvent()
+end
+
+function WatchInfo:updateReadyTimer() -- Returns true if a timer was set, false if handled immediately
+	if self.expiration > GetTime() then
+		if self.readyTimer then
+			prdebug(DEBUG_TIMER, "Updating ready timer from", self.readyTimer.time, "to", self.expiration, "for spellID", self.spellInfo.spellID)
+			ZT.timers:update(self.readyTimer, self.expiration)
+		else
+			prdebug(DEBUG_TIMER, "Adding ready timer of", self.expiration, "for spellID", self.spellInfo.spellID)
+			self.readyTimer = ZT.timers:add(self.expiration, function() self:handleReadyTimer() end)
+		end
+
+		return true
+	else
+		if self.readyTimer then
+			prdebug(DEBUG_TIMER, "Canceling ready timer for spellID", self.spellInfo.spellID)
+			ZT.timers:cancel(self.readyTimer)
+			self.readyTimer = nil
+		end
+
+		self:handleReadyTimer(self.expiration)
+		return false
+	end
+end
+
+function WatchInfo:startCD()
+	if self.charges then
+		if self.charges == 0 or self.charges == self.spellInfo.charges then
+			self.expiration = GetTime() + self.duration
+			self:updateReadyTimer()
+		end
+
+		if self.charges > 0 then
+			self.charges = self.charges - 1
+		end
+	else
+		self.expiration = GetTime() + self.duration
+		self:updateReadyTimer()
+	end
+
+	self:sendTriggerEvent()
+end
+
+function WatchInfo:updateCDDelta(delta)
 	self.expiration = self.expiration + delta
-	sendFrontEndTrigger(self)
-	WatchInfo_startReadyTimer(self, self.expiration - GetTime())
+
+	local time = GetTime()
+	local remaining = self.expiration - time
+
+	if self.charges and remaining <= 0 then
+		local chargesGained = 1 - floor(remaining / self.duration)
+		self.charges = max(self.charges + chargesGained, self.spellInfo.charges)
+		if self.charges == self.spellInfo.charges then
+			self.expiration = time
+		else
+			self.expiration = self.expiration + (chargesGained * self.duration)
+		end
+	end
+
+	if self:updateReadyTimer() then
+		self:sendTriggerEvent()
+	end
 end
 
-local function WatchInfo_updateRemaining(self, remaining)
-	self.expiration = GetTime() + remaining
-	sendFrontEndTrigger(self)
-	WatchInfo_startReadyTimer(self, remaining)
+function WatchInfo:updateCDRemaining(remaining)
+	-- Note: This assumes that when remaining is 0 and the spell uses charges then it gains a charge
+	if self.charges and remaining == 0 then
+		if self.charges < self.spellInfo.charges then
+			self.charges = self.charges + 1
+		end
+
+		-- Below maximum charges the expiration time doesn't change
+		if self.charges < self.spellInfo.charges then
+			self:sendTriggerEvent()
+		else
+			self.expiration = GetTime()
+			self:updateReadyTimer()
+		end
+	else
+		self.expiration = GetTime() + remaining
+		if self:updateReadyTimer() then
+			self:sendTriggerEvent()
+		end
+	end
 end
 
-local function WatchInfo_update(self, spellID, ignoreIfReady, ignoreRateLimit)
-	local startTime, duration, enabled = GetSpellCooldown(spellID)
+function WatchInfo:updatePlayerCharges()
+	charges = GetSpellCharges(self.spellInfo.spellID)
+	if charges then
+		self.charges = charges
+	end
+end
+
+function WatchInfo:updatePlayerCD(spellID, ignoreIfReady)
+	local startTime, duration, enabled
+	if self.charges then
+		local charges, maxCharges
+		charges, maxCharges, startTime, duration = GetSpellCharges(spellID)
+		if charges == maxCharges then
+			startTime = 0
+		end
+		enabled = 1
+		self.charges = charges
+	else
+		startTime, duration, enabled = GetSpellCooldown(spellID)
+	end
+
 	if enabled ~= 0 then
+		local ignoreRateLimit
 		if startTime ~= 0 then
-			ignoreRateLimit = ignoreRateLimit or (self.expiration < GetTime())
+			ignoreRateLimit = (self.expiration < GetTime())
 			self.duration = duration
 			self.expiration = startTime + duration
 		else
@@ -798,45 +1169,19 @@ local function WatchInfo_update(self, spellID, ignoreIfReady, ignoreRateLimit)
 
 		if (not ignoreIfReady) or (startTime ~= 0) then
 			ZT:sendCDUpdate(self, ignoreRateLimit)
-			sendFrontEndTrigger(self)
+			self:sendTriggerEvent()
 		end
 	end
 end
 
-local function WatchInfo_handleStarted(self, spellID)
-	WatchInfo_update(self, spellID, false, true)
-end
-
-local function WatchInfo_handleChanged(self, spellID)
-	WatchInfo_update(self, spellID, false, false)
-end
-
-local function WatchInfo_handleReady(self)
-	self.expiration = GetTime()
-	sendFrontEndTrigger(self)
-	ZT:sendCDUpdate(self, true)
-end
-
-local function WatchInfo_hide(self)
-	sendFrontEndRemove(self)
-	self.isHidden = true
-end
-
-local function WatchInfo_unhide(self)
-	self.isHidden = false
-	sendFrontEndAdd(self)
-end
-
 function ZT:togglePlayerHandlers(watchInfo, enable)
 	local spellID = watchInfo.spellInfo.spellID
-	local toggleEventHandler = enable and self.addEventHandler or self.removeEventHandler
+	local toggleHandlerFunc = enable and self.eventHandlers.add or self.eventHandlers.remove
 
 	if enable then
 		WeakAuras.WatchSpellCooldown(spellID)
 	end
-	toggleEventHandler(self, "SPELL_COOLDOWN_STARTED", spellID, 0, WatchInfo_handleStarted, watchInfo)
-	toggleEventHandler(self, "SPELL_COOLDOWN_CHANGED", spellID, 0, WatchInfo_handleChanged, watchInfo)
-	toggleEventHandler(self, "SPELL_COOLDOWN_READY", spellID, 0, WatchInfo_handleReady, watchInfo)
+	toggleHandlerFunc(self.eventHandlers, "SPELL_COOLDOWN_CHANGED", spellID, 0, watchInfo.updatePlayerCD, watchInfo)
 
 	local links = self.separateLinkedSpellIDs[spellID]
 	if links then
@@ -844,9 +1189,7 @@ function ZT:togglePlayerHandlers(watchInfo, enable)
 			if enable then
 				WeakAuras.WatchSpellCooldown(linkedSpellID)
 			end
-			toggleEventHandler(self, "SPELL_COOLDOWN_STARTED", linkedSpellID, 0, WatchInfo_handleStarted, watchInfo)
-			toggleEventHandler(self, "SPELL_COOLDOWN_CHANGED", linkedSpellID, 0, WatchInfo_handleChanged, watchInfo)
-			toggleEventHandler(self, "SPELL_COOLDOWN_READY", linkedSpellID, 0, WatchInfo_handleReady, watchInfo)
+			toggleHandlerFunc(self.eventHandlers, "SPELL_COOLDOWN_CHANGED", linkedSpellID, 0, watchInfo.updatePlayerCD, watchInfo)
 		end
 	end
 end
@@ -855,15 +1198,15 @@ function ZT:toggleCombatLogHandlers(watchInfo, enable, specInfo)
 	local spellInfo = watchInfo.spellInfo
 	local spellID = spellInfo.spellID
 	local member = watchInfo.member
-	local toggleEventHandler = enable and self.addEventHandler or self.removeEventHandler
+	local toggleHandlerFunc = enable and self.eventHandlers.add or self.eventHandlers.remove
 
 	if not spellInfo.ignoreCast then
-		toggleEventHandler(self, "SPELL_CAST_SUCCESS", spellID, member.GUID, WatchInfo_startCooldown, watchInfo)
+		toggleHandlerFunc(self.eventHandlers, "SPELL_CAST_SUCCESS", spellID, member.GUID, watchInfo.startCD, watchInfo)
 
 		local links = self.linkedSpellIDs[spellID]
 		if links then
 			for _,linkedSpellID in ipairs(links) do
-				toggleEventHandler(self, "SPELL_CAST_SUCCESS", linkedSpellID, member.GUID, WatchInfo_startCooldown, watchInfo)
+				toggleHandlerFunc(self.eventHandlers, "SPELL_CAST_SUCCESS", linkedSpellID, member.GUID, watchInfo.startCD, watchInfo)
 			end
 		end
 	end
@@ -871,7 +1214,7 @@ function ZT:toggleCombatLogHandlers(watchInfo, enable, specInfo)
 	for _,modifier in pairs(spellInfo.mods) do
 		if modifier.type == "Dynamic" then
 			for _,handlerInfo in ipairs(modifier.handlers) do
-				toggleEventHandler(self, handlerInfo.type, handlerInfo.spellID, member.GUID, handlerInfo.handler, watchInfo)
+				toggleHandlerFunc(self.eventHandlers, handlerInfo.type, handlerInfo.spellID, member.GUID, handlerInfo.handler, watchInfo)
 			end
 		end
 	end
@@ -881,7 +1224,7 @@ function ZT:toggleCombatLogHandlers(watchInfo, enable, specInfo)
 			for _, modifier in pairs(modifiers) do
 				if modifier.type == "Dynamic" then
 					for _,handlerInfo in ipairs(modifier.handlers) do
-						toggleEventHandler(self, handlerInfo.type, handlerInfo.spellID, member.GUID, handlerInfo.handler, watchInfo)
+						toggleHandlerFunc(self.eventHandlers, handlerInfo.type, handlerInfo.spellID, member.GUID, handlerInfo.handler, watchInfo)
 					end
 				end
 			end
@@ -903,56 +1246,44 @@ function ZT:watch(spellInfo, member, specInfo, isHidden)
 	local isNew = (watchInfo == nil)
 
 	if not watchInfo then
-		local time = GetTime()
-		watchInfo = {
-			watchID = self.nextWatchID,
-			member = member,
-			spellInfo = spellInfo,
-			duration = member:computeCooldown(spellInfo, specInfo),
-			expiration = time,
-			isHidden = isHidden,
-			lastExpiration = time,
-			startCooldown = WatchInfo_startCooldown,
-			updateDelta = WatchInfo_updateDelta,
-			updateRemaining = WatchInfo_updateRemaining,
-		}
-		self.nextWatchID = self.nextWatchID + 1
-
+		watchInfo = WatchInfo:create(member, spellInfo, isHidden)
 		spells[member.GUID] = watchInfo
 		member.watching[spellID] = watchInfo
-
-		sendFrontEndAdd(watchInfo)
 	else
-		watchInfo.spellInfo = spellInfo
-		watchInfo.duration = member:computeCooldown(spellInfo, specInfo)
-
-		if watchInfo.isHidden and not isHidden then
-			WatchInfo_unhide(watchInfo)
-		end
+		watchInfo:updateSpellInfo(spellInfo, specInfo)
+		watchInfo:toggleHidden(isHidden)
 	end
 
 	if member.isPlayer then
-		WatchInfo_update(watchInfo, spellID, true)
+		watchInfo:updatePlayerCharges()
+		watchInfo:sendAddEvent()
+
+		watchInfo:updatePlayerCD(spellID, true)
 
 		local links = self.separateLinkedSpellIDs[spellID]
 		if links then
-			for _, linkedSpellID in ipairs(links) do
-				WatchInfo_update(watchInfo, linkedSpellID, true)
+			for _,linkedSpellID in ipairs(links) do
+				watchInfo:updatePlayerCD(linkedSpellID, true)
 			end
 		end
+	else
+		watchInfo:sendAddEvent()
 	end
 
-	if member.isPlayer and not self.db.debugCleu then
+	if member.isPlayer and not TEST_CLEU then
 		if isNew then
 			self:togglePlayerHandlers(watchInfo, true)
 		end
 	elseif member.tracking == "CombatLog" or (member.tracking == "Sharing" and member.spellsVersion < spellInfo.version) then
+		watchInfo.ignoreSharing = true
 		if isNew then
 			self:toggleCombatLogHandlers(watchInfo, true, specInfo)
 		else
 			self:toggleCombatLogHandlers(watchInfo, false, member.specInfo)
 			self:toggleCombatLogHandlers(watchInfo, true, specInfo)
 		end
+	else
+		watchInfo.ignoreSharing = false
 	end
 end
 
@@ -964,38 +1295,45 @@ function ZT:unwatch(spellInfo, member, specInfo, keepHidden)
 	end
 
 	local watchInfo = sources[member.GUID]
-	if watchInfo then
-		if member.isPlayer and not self.db.debugCleu then
-			if keepHidden then
-				WatchInfo_hide(watchInfo)
-				return
-			end
+	if not watchInfo then
+		return
+	end
 
-			self:togglePlayerHandlers(watchInfo, false)
-		elseif member.tracking == "CombatLog"  or (member.tracking == "Sharing" and member.spellsVersion < spellInfo.version) then
-			self:toggleCombatLogHandlers(watchInfo, false, specInfo or member.specInfo)
+	if member.isPlayer and not TEST_CLEU then
+		if keepHidden then
+			watchInfo:hide()
+			return
 		end
 
-		self.watching[spellInfo.spellID][member.GUID] = nil
-		member.watching[spellID] = nil
-		watchInfo.readyCountCLEU = 0
-
-		sendFrontEndRemove(watchInfo)
+		self:togglePlayerHandlers(watchInfo, false)
+	elseif member.tracking == "CombatLog"  or (member.tracking == "Sharing" and member.spellsVersion < spellInfo.version) then
+		self:toggleCombatLogHandlers(watchInfo, false, specInfo or member.specInfo)
 	end
+
+	if watchInfo.readyTimer then
+		self.timers:cancel(watchInfo.readyTimer)
+	end
+
+	sources[member.GUID] = nil
+	member.watching[spellID] = nil
+
+	watchInfo:sendRemoveEvent()
 end
 
+--##############################################################################
 -- Tracking types registered by front-end WAs
+
 ZT.registration = {}
 
 function ZT:isTypeRegistered(type)
 	return self.registration[type] and (next(self.registration[type], nil) ~= nil)
 end
 
-function ZT:rebroadcast(type)
+function ZT:resendAddEvents(type)
 	for _,sources in pairs(self.watching) do
 		for _,watchInfo in pairs(sources) do
 			if (watchInfo.spellInfo.type == type) then
-				sendFrontEndAdd(watchInfo)
+				watchInfo:sendAddEvent()
 			end
 		end
 	end
@@ -1012,15 +1350,13 @@ function ZT:registerFrontEnd(type, frontendID)
 		local typeWasRegistered = self:isTypeRegistered(type)
 		self.registration[type][frontendID] = true
 
-		if self.db.debugEvents then
-			print("[ZT] Received ZT_REGISTER", type, frontendID, " -> New", typeWasRegistered and "(Type Registered)" or "(Type Unregistered)")
-		end
-
 		if typeWasRegistered then
-			self:rebroadcast(type)
+			prdebug(DEBUG_EVENT, "Received ZT_REGISTER", type, frontendID, "-> Registering + Resending")
+			self:resendAddEvents(type)
 		else
+			prdebug(DEBUG_EVENT, "Received ZT_REGISTER", type, frontendID, "-> Registering + Watching")
 			for _,member in pairs(self.members) do
-				if (not member.isPlayer) or (self.db.showMine[type]) then
+				if (not member.isPlayer) or (self.config["my"..type]) then
 					for _,allSpellInfo in pairs(self.spellIDToInfo) do
 						if (not allSpellInfo.isBlacklisted) and (type == allSpellInfo.type) then
 							for _,spellInfo in pairs(allSpellInfo.variants) do
@@ -1035,41 +1371,68 @@ function ZT:registerFrontEnd(type, frontendID)
 			end
 		end
 	else
-		if self.db.debugEvents then
-			print("[ZT] Received ZT_REGISTER", type, frontendID, " -> Existing")
-		end
-
-		self:rebroadcast(type)
+		prdebug(DEBUG_EVENT, "Received ZT_REGISTER", type, frontendID, "-> Resending")
+		self:resendAddEvents(type)
 	end
 end
 
 function ZT:unregisterFrontEnd(type, frontendID)
 	self.registration[type][frontendID] = nil
 
-	if not self:isTypeRegistered(type) then
-		if self.db.debugEvents then
-			print("[ZT] Received ZT_UNREGISTER", type)
-		end
 
+	if not self:isTypeRegistered(type) then
+		prdebug(DEBUG_EVENT, "Received ZT_UNREGISTER", type, frontendID, "-> Unregistering + Unwatching")
 		for _,member in pairs(self.members) do
-			for spellID,watchInfo in pairs(member.watching) do
+			for _,watchInfo in pairs(member.watching) do
 				local spellInfo = watchInfo.spellInfo
 				if spellInfo.type == type then
 					self:unwatch(spellInfo, member, member.specInfo, true)
 				end
 			end
 		end
+	else
+		prdebug(DEBUG_EVENT, "Received ZT_UNREGISTER", type, frontendID, "-> Unregistering")
 	end
 end
 
--- Utility functions for operating over all spells available for a group member
+--##############################################################################
+-- Managing member information (e.g., spec, talents) for all group members
+
+local Member = { }
+local MemberMT = { __index = Member }
+
 ZT.members = {}
 ZT.inEncounter = false
 
-local function Member_checkSpellRequirements(self, spellInfo, specInfo)
-	if not specInfo then
-		specInfo = self.specInfo
+function Member:create(memberInfo, isHidden)
+	local member = memberInfo
+	member.watching = {}
+	member.tracking = member.tracking and member.tracking or "CombatLog"
+	member.isPlayer = (member.GUID == UnitGUID("player"))
+	member.isHidden = isHidden
+	member.isReady = false
+
+	return setmetatable(member, MemberMT)
+end
+
+function Member:gatherInfo()
+	local _,className,_,race,_,name = GetPlayerInfoByGUID(self.GUID)
+	self.name = name and gsub(name, "%-[^|]+", "") or nil
+	self.class = className and AllClasses[className] or nil
+	self.classID = className and AllClasses[className].ID or nil
+	self.classColor = className and RAID_CLASS_COLORS[className] or nil
+	self.race = race
+
+	if (self.tracking == "Sharing") and self.name then
+		prdebug(DEBUG_TRACKING, self.name, "is using ZenTracker with spellsVersion", self.spellsVersion)
 	end
+
+	self.isReady = (self.name ~= nil) and (self.classID ~= nil) and (self.race ~= nil)
+	return self.isReady
+end
+
+function Member:checkSpellRequirements(spellInfo, specInfo)
+	specInfo = specInfo or self.specInfo
 
 	if spellInfo.race and spellInfo.race ~= self.race then
 		return false
@@ -1081,39 +1444,30 @@ local function Member_checkSpellRequirements(self, spellInfo, specInfo)
 		return false
 	end
 
-	if spellInfo.reqTalents then
-		local talented = false
-		for _,t in ipairs(spellInfo.reqTalents) do
-			if specInfo.talentsMap[t] then
-				talented = true
-				break
-			end
-		end
-
-		if not talented then
-			return false
+	if not spellInfo.reqTalents then
+		return true
+	end
+	for _,t in ipairs(spellInfo.reqTalents) do
+		if specInfo.talentsMap[t] then
+			return true
 		end
 	end
 
-	return true
+	return false
 end
 
-local function Member_computeCooldown(self, spellInfo, specInfo)
-	if not specInfo then
-		specInfo = self.specInfo
-	end
+function Member:calcSpellCooldown(spellInfo, specInfo)
+	specInfo = specInfo or self.specInfo
 
 	local cooldown = spellInfo.baseCD
-	if spellInfo.modTalents then
-		for talent,modifiers in pairs(spellInfo.modTalents) do
-			if specInfo.talentsMap[talent] then
-				for _,modifier in ipairs(modifiers) do
-					if modifier.type == "Static" then
-						if modifier.sub then
-							cooldown = cooldown - modifier.sub
-						elseif modifier.mul then
-							cooldown = cooldown * modifier.mul
-						end
+	for talent,modifiers in pairs(spellInfo.modTalents) do
+		if specInfo.talentsMap[talent] then
+			for _,modifier in ipairs(modifiers) do
+				if modifier.type == "Static" then
+					if modifier.sub then
+						cooldown = cooldown - modifier.sub
+					elseif modifier.mul then
+						cooldown = cooldown * modifier.mul
 					end
 				end
 			end
@@ -1123,59 +1477,44 @@ local function Member_computeCooldown(self, spellInfo, specInfo)
 	return cooldown
 end
 
-local function Member_hide(self)
+function Member:hide()
 	if not self.isHidden and not self.isPlayer then
 		self.isHidden = true
 		for _,watchInfo in pairs(self.watching) do
-			WatchInfo_hide(watchInfo)
+			watchInfo:hide()
 		end
 	end
 end
 
-local function Member_unhide(self)
+function Member:unhide()
 	if self.isHidden and not self.isPlayer then
 		self.isHidden = false
 		for _,watchInfo in pairs(self.watching) do
-			WatchInfo_unhide(watchInfo)
+			watchInfo:unhide()
 		end
 	end
 end
 
 function ZT:addOrUpdateMember(memberInfo)
-	local member = self.members[memberInfo.GUID]
-	if not member then
-		member = memberInfo
-		member.watching = {}
-		member.tracking = member.tracking and member.tracking or "CombatLog"
-		member.isPlayer = (member.GUID == UnitGUID("player"))
-		member.isHidden = (not member.isPlayer and self.inEncounter)
-		member.isReady = false
-		member.checkSpellRequirements = Member_checkSpellRequirements
-		member.computeCooldown = Member_computeCooldown
-		self.members[memberInfo.GUID] = member
-	end
-
-	-- Gathering all necessary information about the member (if we don't have it already)
-	local justBecameReady = false
-	if not member.isReady then
-		local _,className,_,race,_,name = GetPlayerInfoByGUID(member.GUID)
-		member.name = name and gsub(name, "%-[^|]+", "") or nil
-		if self.db.debugTracking and (member.tracking == "Sharing") and member.name then
-			print("[ZT]", member.name, "is using ZenTracker ( SpellsVersion =", member.spellsVersion, ")")
-		end
-		member.class = className and AllClasses[className] or nil
-		member.classID = className and AllClasses[className].ID or nil
-		member.classColor = className and RAID_CLASS_COLORS[className] or nil
-		member.race = race
-
-		member.isReady = (member.name ~= nil) and (member.classID ~= nil) and (member.race ~= nil)
-		justBecameReady = member.isReady
-	end
-
 	local specInfo = memberInfo.specInfo
 
+	local member = self.members[memberInfo.GUID]
+	if not member then
+		local isHidden
+		if self.inEncounter and not member.isPlayer then
+			local _,_,_,instanceID = UnitPosition("player")
+			local _,_,_,mInstanceID = UnitPosition(self.inspectLib:GuidToUnit(member.GUID))
+			isHidden = (instanceID ~= mInstanceID)
+		else
+			isHidden = false
+		end
+
+		member = Member:create(memberInfo, isHidden)
+		self.members[member.GUID] = member
+	end
+
 	-- Update if the member is now ready, or if they swapped specs/talents
-	local needsUpdate = justBecameReady
+	local needsUpdate = not member.isReady and member:gatherInfo()
 	if specInfo.specID and specInfo.talents then
 		if (specInfo.specID ~= member.specInfo.specID) or (specInfo.talents ~= member.specInfo.talents) then
 			needsUpdate = true
@@ -1183,7 +1522,6 @@ function ZT:addOrUpdateMember(memberInfo)
 	end
 
 	if needsUpdate then
-		-- If we are updating information about the player, send a handshake now
 		if member.isPlayer then
 			self:sendHandshake(specInfo)
 		end
@@ -1194,11 +1532,11 @@ function ZT:addOrUpdateMember(memberInfo)
 			local isBlacklisted = allSpellInfo.isBlacklisted
 			local hasSpell = false
 
-			if member.isPlayer then -- If player, watch all possible spells (but some may be hidden)
+			if member.isPlayer then -- If player, watch all possible spells (some may be hidden)
 				for _,spellInfo in ipairs(allSpellInfo.variants) do
 					hasSpell = member:checkSpellRequirements(spellInfo, specInfo)
 					if hasSpell then
-						local isHidden = (not isRegistered) or (not self.db.showMine[allSpellInfo.type]) or isBlacklisted
+						local isHidden = (not isRegistered) or (not self.config["my"..allSpellInfo.type]) or isBlacklisted
 						self:watch(spellInfo, member, specInfo, isHidden)
 						break
 					end
@@ -1227,12 +1565,13 @@ function ZT:addOrUpdateMember(memberInfo)
 		member.tracking = "Sharing"
 		member.spellsVersion = memberInfo.spellsVersion
 
-		if self.db.debugTracking and member.name then
-			print("[ZT]", member.name, "is using ZenTracker ( SpellsVersion =", member.spellsVersion, ")")
+		if member.name then
+			prdebug(DEBUG_TRACKING, member.name, "is using ZenTracker with spell list version", member.spellsVersion)
 		end
 
 		for _,watchInfo in pairs(member.watching) do
 			if watchInfo.spellInfo.version <= member.spellsVersion then
+				watchInfo.ignoreSharing = false
 				self:toggleCombatLogHandlers(watchInfo, false, member.specInfo)
 			end
 		end
@@ -1247,12 +1586,16 @@ function ZT:addOrUpdateMember(memberInfo)
 	end
 end
 
+--##############################################################################
+-- Handling raid and M+ encounters
+
 function ZT:resetEncounterCDs()
 	for _,member in pairs(self.members) do
 		if not member.isPlayer and member.tracking ~= "Sharing" then
 			for _,watchInfo in pairs(member.watching) do
 				if watchInfo.duration >= 180 then
-					WatchInfo_updateRemaining(watchInfo, 0)
+					watchInfo.charges = watchInfo.spellInfo.charges
+					watchInfo:updateCDRemaining(0)
 				end
 			end
 		end
@@ -1260,19 +1603,15 @@ function ZT:resetEncounterCDs()
 end
 
 function ZT:startEncounter(event)
-	-- Note: This shouldn't happen, but in case it does...
-	if self.inEncounter then
-		for _,member in pairs(self.members) do
-			Member_unhide(member)
-		end
-	end
-
 	self.inEncounter = true
+
 	local _,_,_,instanceID = UnitPosition("player")
 	for _,member in pairs(self.members) do
 		local _,_,_,mInstanceID = UnitPosition(self.inspectLib:GuidToUnit(member.GUID))
 		if mInstanceID ~= instanceID then
-			Member_hide(member)
+			member:hide()
+		else
+			member:unhide() -- Note: Shouldn't be hidden, but just in case...
 		end
 	end
 
@@ -1285,7 +1624,7 @@ function ZT:endEncounter(event)
 	if self.inEncounter then
 		self.inEncounter = false
 		for _,member in pairs(self.members) do
-			Member_unhide(member)
+			member:unhide()
 		end
 	end
 
@@ -1294,26 +1633,27 @@ function ZT:endEncounter(event)
 	end
 end
 
+--##############################################################################
+-- Handling the exchange of addon messages with other ZT clients
+--
 -- Message Format = <Protocol Version (%d)>:<Message Type (%s)>:<Member GUID (%s)>...
 --   Type = "H" (Handshake)
 --     ...:<Spec ID (%d)>:<Talents (%s)>:<IsInitial? (%d) [2]>:<Spells Version (%d) [2]>
 --   Type = "U" (CD Update)
---     ...:<Spell ID (%d)>:<Duration (%f)>:<Remaining (%f)>
+--     ...:<Spell ID (%d)>:<Duration (%f)>:<Remaining (%f)>:<#Charges (%d) [3]>
 
-ZT.protocolVersion = 2
+ZT.protocolVersion = 3
 
 ZT.timeBetweenHandshakes = 5 --seconds
-ZT.timeOfLastHandshake = 0
-ZT.queuedHandshake = false
+ZT.timeOfNextHandshake = 0
+ZT.handshakeTimer = nil
 
 ZT.timeBetweenCDUpdates = 5 --seconds (per spellID)
-ZT.timeOfLastCDUpdate = {}
-ZT.queuedCDUpdates = {}
+ZT.timeOfNextCDUpdate = {}
+ZT.updateTimers = {}
 
 local function sendMessage(message)
-	if ZT.db.debugMessages then
-		print("[ZT] Sending Message '"..message.."'")
-	end
+	prdebug(DEBUG_MESSAGE, "Sending message '"..message.."'")
 
 	if not IsInGroup() and not IsInRaid() then
 		return
@@ -1326,16 +1666,18 @@ end
 ZT.hasSentHandshake = false
 function ZT:sendHandshake(specInfo)
 	local time = GetTime()
-	local timeSinceLastHandshake = (time - self.timeOfLastHandshake)
-	if timeSinceLastHandshake < self.timeBetweenHandshakes then
-		if not self.queuedHandshake then
-			self.queuedHandshake = true
-			C_Timer_After(self.timeBetweenHandshakes - timeSinceLastHandshake, function() self:sendHandshake() end)
+	if time < self.timeOfNextHandshake then
+		if not self.handshakeTimer then
+			self.handshakeTimer = self.timers:add(self.timeOfNextHandshake, function() self:sendHandshake() end)
 		end
 		return
 	end
 
 	local GUID = UnitGUID("player")
+	if not self.members[GUID] then
+		return -- This may happen when rejoining a group after login, so ignore this attempt to send a handshake
+	end
+
 	specInfo = specInfo or self.members[GUID].specInfo
 	local specID = specInfo.specID or 0
 	local talents = specInfo.talents or ""
@@ -1343,49 +1685,45 @@ function ZT:sendHandshake(specInfo)
 	local message = string.format("%d:H:%s:%d:%s:%d:%d", self.protocolVersion, GUID, specID, talents, isInitial, self.spellsVersion)
 	sendMessage(message)
 
-	self.timeOfLastHandshake = time
-	self.queuedHandshake = false
 	self.hasSentHandshake = true
+	self.timeOfNextHandshake = time + self.timeBetweenHandshakes
+	if self.handshakeTimer then
+		self.timers:cancel(self.handshakeTimer)
+		self.handshakeTimer = nil
+	end
 end
 
-function ZT:sendCDUpdate(watchInfo, ignoreRateLimit, wasQueued)
+function ZT:sendCDUpdate(watchInfo, ignoreRateLimit)
 	local spellID = watchInfo.spellInfo.spellID
 	local time = GetTime()
-	local remaining = watchInfo.expiration - time
-	if remaining < 0 then
-		remaining = 0
-	end
 
-	if not ignoreRateLimit then
-		local isQueued = self.queuedCDUpdates[spellID]
-		if wasQueued then
-			if not isQueued then
-				return -- Ignore since an update occured while this update was queued
-			end
-		else
-			if isQueued then
-				return -- Ignore since an update is already queued
-			else
-				local timeOfLastCDUpdate = self.timeOfLastCDUpdate[spellID]
-				if timeOfLastCDUpdate then
-					local timeSinceLastCDUpdate = (time - self.timeOfLastCDUpdate[spellID])
-					if timeSinceLastCDUpdate < self.timeBetweenCDUpdates then
-						self.queuedCDUpdates[spellID] = true
-						C_Timer_After(self.timeBetweenCDUpdates - timeSinceLastCDUpdate, function() self:sendCDUpdate(watchInfo, false, true) end)
-						return -- Ignore since an update has now been queued
-					end
-				end
-			end
+	local timer = self.updateTimers[spellID]
+	if ignoreRateLimit then
+		if timer then
+			self.timers:cancel(timer)
+			self.updateTimers[spellID] = nil
+		end
+	elseif timer then
+		return
+	else
+		local timeOfNextCDUpdate = self.timeOfNextCDUpdate[spellID]
+		if timeOfNextCDUpdate and (time < timeOfNextCDUpdate) then
+			self.updateTimers[spellID] = self.timers:add(timeOfNextCDUpdate, function() self:sendCDUpdate(watchInfo, true) end)
+			return
 		end
 	end
 
 	local GUID = watchInfo.member.GUID
 	local duration = watchInfo.duration
-	local message = string.format("%d:U:%s:%d:%0.2f:%0.2f", self.protocolVersion, GUID, spellID, duration, remaining)
+	local remaining = watchInfo.expiration - time
+	if remaining < 0 then
+		remaining = 0
+	end
+	local charges = watchInfo.charges and tostring(watchInfo.charges) or "-"
+	local message = string.format("%d:U:%s:%d:%0.2f:%0.2f:%s", self.protocolVersion, GUID, spellID, duration, remaining, charges)
 	sendMessage(message)
 
-	self.timeOfLastCDUpdate[spellID] = time
-	self.queuedCDUpdates[spellID] = false
+	self.timeOfNextCDUpdate[spellID] = time + self.timeBetweenCDUpdates
 end
 
 function ZT:handleHandshake(mGUID, specID, talents, isInitial, spellsVersion)
@@ -1438,7 +1776,7 @@ function ZT:handleHandshake(mGUID, specID, talents, isInitial, spellsVersion)
 	end
 end
 
-function ZT:handleCDUpdate(mGUID, spellID, duration, remaining)
+function ZT:handleCDUpdate(mGUID, spellID, duration, remaining, charges)
 	local member = self.members[mGUID]
 	if not member or not member.isReady then
 		return
@@ -1454,27 +1792,34 @@ function ZT:handleCDUpdate(mGUID, spellID, duration, remaining)
 	local sources = self.watching[spellID]
 	if sources then
 		local watchInfo = sources[member.GUID]
-		if not watchInfo then
+		if not watchInfo or watchInfo.ignoreSharing then
 			return
 		end
 
+		-- Protocol V3: Ignore charges if not present
+		-- (Note that this shouldn't happen because of spell list version handling)
+		if charges then
+			charges = tonumber(charges)
+			if charges then
+				watchInfo.charges = charges
+			end
+		end
+
 		watchInfo.duration = duration
-		watchInfo:updateRemaining(remaining)
+		watchInfo.expiration = GetTime() + remaining
+		watchInfo:sendTriggerEvent()
 	end
 end
 
 function ZT:handleMessage(message)
 	local protocolVersion, type, mGUID, arg1, arg2, arg3, arg4, arg5 = strsplit(":", message)
-	protocolVersion = tonumber(protocolVersion)
 
 	-- Ignore any messages sent by the player
 	if mGUID == UnitGUID("player") then
 		return
 	end
 
-	if ZT.db.debugMessages then
-		print("[ZT] Received Message '"..message.."'")
-	end
+	prdebug(DEBUG_MESSAGE, "Received message '"..message.."'")
 
 	if type == "H" then     -- Handshake
 		self:handleHandshake(mGUID, arg1, arg2, arg3, arg4, arg5)
@@ -1485,14 +1830,18 @@ function ZT:handleMessage(message)
 	end
 end
 
+--##############################################################################
 -- Callback functions for libGroupInspecT for updating/removing members
+
+ZT.delayedUpdates = {}
+
 function ZT:libInspectUpdate(event, GUID, unit, info)
 	local specID = info.global_spec_id
 	if specID == 0 then
 		specID = nil
 	end
 
-	local talents
+	local talents = nil
 	local talentsMap = {}
 	if info.talents then
 		for _,talentInfo in pairs(info.talents) do
@@ -1516,7 +1865,11 @@ function ZT:libInspectUpdate(event, GUID, unit, info)
 		},
 	}
 
-	self:addOrUpdateMember(memberInfo)
+	if not self.delayedUpdates then
+		self:addOrUpdateMember(memberInfo)
+	else
+		self.delayedUpdates[#self.delayedUpdates + 1] = memberInfo
+	end
 end
 
 function ZT:libInspectRemove(event, GUID)
@@ -1531,16 +1884,29 @@ function ZT:libInspectRemove(event, GUID)
 	self.members[GUID] = nil
 end
 
+function ZT:handleDelayedUpdates()
+	if self.delayedUpdates then
+		for _,memberInfo in ipairs(self.delayedUpdates) do
+			self:addOrUpdateMember(memberInfo)
+		end
+		self.delayedUpdates = nil
+	end
+end
+
 function ZT:Init()
 	self:BuildSpellList();
 
 	if not C_ChatInfo.RegisterAddonMessagePrefix("ZenTracker") then
-		print("[ZT] Error: Could not register addon message prefix. Defaulting to local-only cooldown tracking.")
+		prerror("Could not register addon message prefix. Defaulting to local-only cooldown tracking.")
 	end
 
-	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Update", "libInspectUpdate")
-	self.inspectLib.RegisterCallback(self, "GroupInSpecT_Remove", "libInspectRemove")
-	--self.inspectLib:Rescan() -- Keep it here in case library fails
+	-- If prevZT exists, we know it wasn't a login or reload. If it doesn't exist,
+	-- it still might not be a login or reload if the user is installing ZenTracker
+	-- for the first time. IsLoginFinished() takes care of the second case.
+
+	ZT.inspectLib.RegisterCallback(ZT, "GroupInSpecT_Update", "libInspectUpdate")
+	ZT.inspectLib.RegisterCallback(ZT, "GroupInSpecT_Remove", "libInspectRemove")
+
 	for unit in IterateGroupMembers() do
 		local GUID = UnitGUID(unit)
 		if GUID then
@@ -1553,6 +1919,3 @@ function ZT:Init()
 		end
 	end
 end
-
-
-

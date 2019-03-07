@@ -1,6 +1,7 @@
 local addonName, ZT = ...;
 
 local WeakAuras = WeakAuras;
+local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo;
 local CreateFrame = CreateFrame;
 local hooksecurefunc = hooksecurefunc;
 

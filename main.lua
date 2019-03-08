@@ -2,6 +2,8 @@ local addonName, ZT = ...;
 
 _G[addonName] = ZT;
 
+ZT.inspectLib = LibStub:GetLibrary("LibGroupInSpecT-1.1", true);
+
 -- Local versions of commonly used functions
 local ipairs = ipairs
 local pairs = pairs
@@ -628,24 +630,10 @@ ZT.spellIDToInfo = {}
 
 local function isSpellBlacklisted(spellInfo)
 	local spellID = spellInfo.spellID
-	local usingBlacklist = (ZT.config["spellConfigType"] == 1)
-	local isBlacklisted = ZT.config["spell"..spellID]
 
-	if isBlacklisted == nil then
-		local configSpellID = ZT.sharedConfigSpellIDs[spellID]
-		if configSpellID then
-			isBlacklisted = ZT.config["spell"..configSpellID]
-		else
-			isBlacklisted = (not usingBlacklist)
-			if not spellInfo.isCustom then
-				prerror("Config not present for spellID", spellID)
-			end
-		end
-	end
-
-	if not usingBlacklist then
-		isBlacklisted = not isBlacklisted
-	end
+	local spellName = GetSpellInfo(spellID);
+	spellName = spellName:gsub('%s+', '');
+	local isBlacklisted = ZT.db.blacklist[spellName];
 
 	return isBlacklisted
 end
@@ -1356,7 +1344,7 @@ function ZT:registerFrontEnd(type, frontendID)
 		else
 			prdebug(DEBUG_EVENT, "Received ZT_REGISTER", type, frontendID, "-> Registering + Watching")
 			for _,member in pairs(self.members) do
-				if (not member.isPlayer) or (self.config["my"..type]) then
+				if (not member.isPlayer) or (self.db.showMine[type]) then
 					for _,allSpellInfo in pairs(self.spellIDToInfo) do
 						if (not allSpellInfo.isBlacklisted) and (type == allSpellInfo.type) then
 							for _,spellInfo in pairs(allSpellInfo.variants) do
@@ -1536,7 +1524,7 @@ function ZT:addOrUpdateMember(memberInfo)
 				for _,spellInfo in ipairs(allSpellInfo.variants) do
 					hasSpell = member:checkSpellRequirements(spellInfo, specInfo)
 					if hasSpell then
-						local isHidden = (not isRegistered) or (not self.config["my"..allSpellInfo.type]) or isBlacklisted
+						local isHidden = (not isRegistered) or (not self.db.showMine[allSpellInfo.type]) or isBlacklisted
 						self:watch(spellInfo, member, specInfo, isHidden)
 						break
 					end
@@ -1841,7 +1829,7 @@ function ZT:libInspectUpdate(event, GUID, unit, info)
 		specID = nil
 	end
 
-	local talents = nil
+	local talents
 	local talentsMap = {}
 	if info.talents then
 		for _,talentInfo in pairs(info.talents) do

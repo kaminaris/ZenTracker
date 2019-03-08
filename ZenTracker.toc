@@ -1,12 +1,12 @@
 ## Title: ZenTracker
-## Version: 8.0.12
+## Version: 8.1.0
 ## Author: Zen, Kaminaris
 ## Interface: 80000
 ## Dependencies: WeakAuras
 ## SavedVariables: ZenTrackerDb
 ## X-Curse-Project-ID: 308096
 ## X-WoWI-ID: 24863
-## X-Aura-Version: 1.0.8
+## X-Aura-Version: 1.1.1
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua

@@ -157,11 +157,11 @@ local modCapTotem = DynamicMod({
 		end
 
 		if watchInfo.totemGUID then
-			ZT:removeEventHandler("SPELL_AURA_APPLIED", 118905, watchInfo.totemGUID, watchInfo.totemHandler)
+			ZT.eventHandlers:remove("SPELL_AURA_APPLIED", 118905, watchInfo.totemGUID, watchInfo.totemHandler)
 		end
 
 		watchInfo.totemGUID = select(8, CombatLogGetCurrentEventInfo())
-		ZT:addEventHandler("SPELL_AURA_APPLIED", 118905, watchInfo.totemGUID, watchInfo.totemHandler, watchInfo)
+		ZT.eventHandlers:add("SPELL_AURA_APPLIED", 118905, watchInfo.totemGUID, watchInfo.totemHandler, watchInfo)
 	end
 })
 
@@ -521,8 +521,8 @@ ZT.typeToTrackedSpells["DAMAGE"] = {
 }
 
 ZT.typeToTrackedSpells["TANK"] = {
-	{spellID=206931, specs={DK.Blood}, baseCD=30, reqTalents={43}, version=6}, -- Blooddrinker
-	{spellID=274156, specs={DK.Blood}, baseCD=45, reqTalents={43}, version=6}, -- Consumption
+	{spellID=206931, specs={DK.Blood}, baseCD=30, reqTalents={12}, version=6}, -- Blooddrinker
+	{spellID=274156, specs={DK.Blood}, baseCD=45, reqTalents={23}, version=6}, -- Consumption
 	{spellID=49028, specs={DK.Blood}, baseCD=120}, -- Dancing Rune Weapon
 	{spellID=194679, specs={DK.Blood}, baseCD=25, charges=2, reqTalents={43}, version=6}, -- Rune Tap
 	{spellID=194844, specs={DK.Blood}, baseCD=60, reqTalents={73}}, -- Bonestorm
@@ -1489,9 +1489,9 @@ function ZT:addOrUpdateMember(memberInfo)
 	local member = self.members[memberInfo.GUID]
 	if not member then
 		local isHidden
-		if self.inEncounter and not member.isPlayer then
+		if self.inEncounter and (memberInfo.GUID ~= UnitGUID("player")) then
 			local _,_,_,instanceID = UnitPosition("player")
-			local _,_,_,mInstanceID = UnitPosition(self.inspectLib:GuidToUnit(member.GUID))
+			local _,_,_,mInstanceID = UnitPosition(self.inspectLib:GuidToUnit(memberInfo.GUID))
 			isHidden = (instanceID ~= mInstanceID)
 		else
 			isHidden = false

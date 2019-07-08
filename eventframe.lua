@@ -53,9 +53,9 @@ function ZT.ScanEvents(...)
 	local event, type, frontendID = ...;
 
 	if event == 'ZT_REGISTER' then
-		ZT:registerFrontEnd(type, frontendID)
+		ZT:registerFrontEnd(frontendID, type)
 	elseif event == 'ZT_UNREGISTER' then
-		ZT:unregisterFrontEnd(type, frontendID)
+		ZT:unregisterFrontEnd(frontendID, type)
 	elseif
 		event == 'SPELL_COOLDOWN_READY' or
 		event == 'SPELL_COOLDOWN_CHANGED'

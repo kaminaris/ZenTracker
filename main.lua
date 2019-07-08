@@ -1,5 +1,4 @@
 local addonName, ZT = ...;
-
 _G[addonName] = ZT;
 
 ZT.inspectLib = LibStub:GetLibrary("LibGroupInSpecT-1.1", true);
@@ -17,8 +16,6 @@ local UnitGUID = UnitGUID
 local GetTime = GetTime
 
 local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
-local C_ChatInfo_SendAddonMessage = C_ChatInfo.SendAddonMessage
-local C_Timer_After = C_Timer.After
 
 -- Turns on/off debugging messages
 local DEBUG_EVENT = { isEnabled = false, color = "FF2281F4" }
@@ -40,8 +37,44 @@ local function prerror(...)
 	print("|cFFFF0000[ZT-Error]", ...)
 end
 
+local function Table_Create(values)
+	if not values then
+		return {}
+	elseif not values[1] then
+		return { values }
+	end
+	return values
+end
+
+local function DefaultTable_Create(genDefaultFunc)
+	local table = {}
+	local metatable = {}
+	metatable.__index = function(table, key)
+		local value = genDefaultFunc()
+		rawset(table, key, value)
+		return value
+	end
+
+	return setmetatable(table, metatable)
+end
+
+local function Map_FromTable(table)
+	local map = {}
+	for _,value in ipairs(table) do
+		map[value] = true
+	end
+	return map
+end
+
+-- TODOs
+--
+-- 1) Fix the registration to allow for spellIDs or types
+-- 2) Track front-end registration at the level of spellIDs
+-- 3) Change spell list to allow for multiple types per spell (introduce RAIDCD)
+
 --##############################################################################
 -- Class and Spec Information
+
 local DH = {ID=12, name="DEMONHUNTER", Havoc=577, Veng=581}
 local DK = {ID=6, name="DEATHKNIGHT", Blood=250, Frost=251, Unholy=252}
 local Druid = {ID=11, name="DRUID", Balance=102, Feral=103, Guardian=104, Resto=105}
@@ -249,290 +282,265 @@ end
 --##############################################################################
 -- List of Tracked Spells
 
-ZT.spellsVersion = 6
-ZT.typeToTrackedSpells = {}
-
-ZT.typeToTrackedSpells["INTERRUPT"] = {
-	{spellID=183752, class=DH, baseCD=15}, -- Consume Magic
-	{spellID=47528, class=DK, baseCD=15}, -- Mind Freeze
-	{spellID=91802, specs={DK.Unholy}, baseCD=30}, -- Shambling Rush
-	{spellID=78675, specs={Druid.Balance}, baseCD=60}, -- Solar Beam
-	{spellID=106839, specs={Druid.Feral,Druid.Guardian}, baseCD=15}, -- Skull Bash
-	{spellID=147362, specs={Hunter.BM, Hunter.MM}, baseCD=24}, -- Counter Shot
-	{spellID=187707, specs={Hunter.SV}, baseCD=15}, -- Muzzle
-	{spellID=2139, class=Mage, baseCD=24}, -- Counter Spell
-	{spellID=116705, specs={Monk.WW, Monk.BRM}, baseCD=15}, -- Spear Hand Strike
-	{spellID=96231, specs={Paladin.Prot, Paladin.Ret}, baseCD=15}, -- Rebuke
-	{spellID=15487, specs={Priest.Shadow}, baseCD=45, modTalents={[41]=StaticMod("sub", 15)}}, -- Silence
-	{spellID=1766, class=Rogue, baseCD=15}, -- Kick
-	{spellID=57994, class=Shaman, baseCD=12}, -- Wind Shear
-	{spellID=19647, class=Warlock, baseCD=24}, -- Spell Lock
-	{spellID=6552, class=Warrior, baseCD=15}, -- Pummel
-}
-
-ZT.typeToTrackedSpells["HARDCC"] = {
-	{spellID=179057, specs={DH.Havoc}, baseCD=60, modTalents={[61]=StaticMod("mul", 0.666667)}}, -- Chaos Nova
-	{spellID=119381, class=Monk, baseCD=60, modTalents={[41]=StaticMod("sub", 10)}}, -- Leg Sweep
-	{spellID=192058, class=Shaman, baseCD=60, modTalents={[33]=modCapTotem}}, -- Capacitor Totem
-	{spellID=30283, class=Warlock, baseCD=60, modTalents={[51]=StaticMod("sub", 15)}}, -- Shadowfury
-	{spellID=46968, specs={Warrior.Prot}, baseCD=40, modTalents={[52]=modShockwave}}, -- Shockwave
-	{spellID=255654, race="HighmountainTauren", baseCD=120}, -- Bull Rush
-	{spellID=20549, race="Tauren", baseCD=90}, -- War Stomp
-}
-
-ZT.typeToTrackedSpells["SOFTCC"] = {
-	{spellID=202138, specs={DH.Veng}, baseCD=90, reqTalents={53}}, -- Sigil of Chains
-	{spellID=207684, specs={DH.Veng}, baseCD=90, modTalents={[52]=StaticMod("mul", 0.8)}}, -- Sigil of Misery
-	{spellID=202137, specs={DH.Veng}, baseCD=60, modTalents={[52]=StaticMod("mul", 0.8)}}, -- Sigil of Silence
-	{spellID=108199, specs={DK.Blood}, baseCD=120, modTalents={[52]=StaticMod("sub", 30)}}, -- Gorefiend's Grasp
-	{spellID=207167, specs={DK.Frost}, baseCD=60, reqTalents={33}}, -- Blinding Sleet
-	{spellID=132469, class=Druid, baseCD=30, reqTalents={43}}, -- Typhoon
-	{spellID=102359, class=Druid, baseCD=30, reqTalents={42}}, -- Mass Entanglement
-	{spellID=99, specs={Druid.Guardian}, baseCD=30}, -- Incapacitating Roar
-	{spellID=102793, specs={Druid.Guardian}, baseCD=60, reqTalents={22}}, -- Ursol's Vortex
-	{spellID=102793, specs={Druid.Resto}, baseCD=60}, -- Ursol's Vortex
-	{spellID=109248, class=Hunter, baseCD=30, reqTalents={53}}, -- Binding Shot
-	{spellID=122, class=Mage, baseCD=30, reqTalents={51,53}, mods=CastRemainingMod(235219,0), version=6}, -- Frost Nova
-	{spellID=122, class=Mage, baseCD=30, charges=2, reqTalents={52}, mods=CastRemainingMod(235219,0), version=6}, -- Frost Nova
-	{spellID=113724, class=Mage, baseCD=30, reqTalents={53}, version=6}, -- Ring of Frost
-	{spellID=31661, specs={Mage.Fire}, baseCD=20, version=2}, -- Dragon's Breath
-	{spellID=33395, specs={Mage.Frost}, baseCD=25, reqTalents={11,13}, version=6}, -- Freeze (Pet)
-	{spellID=116844, class=Monk, baseCD=45, reqTalents={43}}, -- Ring of Peace
-	{spellID=115750, class=Paladin, baseCD=90, reqTalents={33}, version=3}, -- Blinding Light
-	{spellID=8122, specs={Priest.Disc,Priest.Holy}, baseCD=60, modTalents={[41]=StaticMod("sub", 30)}}, -- Psychic Scream
-	{spellID=204263, specs={Priest.Disc,Priest.Holy}, baseCD=45, reqTalents={43}}, -- Shining Force
-	{spellID=8122, specs={Priest.Shadow}, baseCD=60}, -- Psychic Scream
-	{spellID=51490, specs={Shaman.Ele}, baseCD=45}, -- Thunderstorm
-}
-
-ZT.typeToTrackedSpells["STHARDCC"] = {
-	{spellID=211881, specs={DH.Havoc}, baseCD=30, reqTalents={63}}, -- Fel Eruption
-	{spellID=221562, specs={DK.Blood}, baseCD=45}, -- Asphyxiate
-	{spellID=108194, specs={DK.FrostDK}, baseCD=45, reqTalents={32}}, -- Asphyxiate
-	{spellID=108194, specs={DK.Unholy}, baseCD=45, reqTalents={33}}, -- Asphyxiate
-	{spellID=5211, class=Druid, baseCD=50, reqTalents={41}}, -- Mighty Bash
-	{spellID=19577, specs={Hunter.BM,Hunter.Surv}, baseCD=60}, -- Intimidation
-	{spellID=853, specs={Paladin.Holy}, baseCD=60, modTalents={[31]=CastDeltaMod(275773, -10)}}, -- Hammer of Justice
-	{spellID=853, specs={Paladin.Prot}, baseCD=60, modTalents={[31]=CastDeltaMod(275779, -6)}}, -- Hammer of Justice
-	{spellID=853, specs={Paladin.Ret}, baseCD=60}, -- Hammer of Justice
-	{spellID=88625, specs={Priest.Holy}, baseCD=60, reqTalents={42}, mods=CastDeltaMod(585, -4), modTalents={[71]=CastDeltaMod(585, -1.333333)}}, -- Holy Word: Chastise
-	{spellID=64044, specs={Priest.Shadow}, baseCD=45, reqTalents={43}}, -- Psychic Horror
-	{spellID=6789, class=Warlock, baseCD=45, reqTalents={52}}, -- Mortal Coil
-	{spellID=107570, specs={Warrior.Arms,Warrior.Fury}, baseCD=30, reqTalents={23}}, -- Storm Bolt
-	{spellID=107570, specs={Warrior.Prot}, baseCD=30, reqTalents={53}}, -- Storm Bolt
-}
-
-ZT.typeToTrackedSpells["STSOFTCC"] = {
-	{spellID=217832, class=DH, baseCD=45}, -- Imprison
-	{spellID=49576, specs={DK.Blood}, baseCD=15, version=2}, -- Death Grip
-	{spellID=49576, specs={DK.Frost,DK.Unholy}, baseCD=25, version=2}, -- Death Grip
-	{spellID=2094, specs={Rogue.Outlaw}, baseCD=120, modTalents={[52]=StaticMod("sub", 30)}}, -- Blind
-	{spellID=2094, specs={Rogue.Sin,Rogue.Sub}, baseCD=120}, -- Blind
-	{spellID=115078, class=Monk, baseCD=45}, -- Paralysis
-	{spellID=187650, class=Hunter, baseCD=30}, -- Freezing Trap
-	{spellID=107079, race="Pandaren", baseCD=120, version=4}, -- Quaking Palm
-}
-
-ZT.typeToTrackedSpells["DISPEL"] = {
-	{spellID=278326, class=DH, baseCD=10, version=6}, -- Consume Magic
-	{spellID=2908, class=Druid, baseCD=10, version=6}, -- Soothe
-	{spellID=32375, class=Priest, baseCD=45}, -- Mass Dispel
-	{spellID=202719, race="BloodElf", class=DH, baseCD=120}, -- Arcane Torrent
-	{spellID=50613, race="BloodElf", class=DK, baseCD=120}, -- Arcane Torrent
-	{spellID=80483, race="BloodElf", class=Hunter, baseCD=120}, -- Arcane Torrent
-	{spellID=28730, race="BloodElf", class=Mage, baseCD=120}, -- Arcane Torrent
-	{spellID=129597, race="BloodElf", class=Monk, baseCD=120}, -- Arcane Torrent
-	{spellID=155145, race="BloodElf", class=Paladin, baseCD=120}, -- Arcane Torrent
-	{spellID=232633, race="BloodElf", class=Priest, baseCD=120}, -- Arcane Torrent
-	{spellID=25046, race="BloodElf", class=Rogue, baseCD=120}, -- Arcane Torrent
-	{spellID=28730, race="BloodElf", class=Warlock, baseCD=120}, -- Arcane Torrent
-	{spellID=69179, race="BloodElf", class=Warrior, baseCD=120}, -- Arcane Torrent
-}
-
-ZT.typeToTrackedSpells["DEFMDISPEL"] = {
-	{spellID=88423, specs={Druid.Resto}, baseCD=8, mods=DispelMod(88423), ignoreCast=true}, -- Nature's Cure
-	{spellID=115450, specs={Monk.MW}, baseCD=8, mods=DispelMod(115450), ignoreCast=true}, -- Detox
-	{spellID=4987, specs={Paladin.Holy}, baseCD=8, mods=DispelMod(4987), ignoreCast=true}, -- Cleanse
-	{spellID=527, specs={Priest.Disc,Priest.Holy}, baseCD=8, mods=DispelMod(527), ignoreCast=true}, -- Purify
-	{spellID=77130, specs={Shaman.Resto}, baseCD=8, mods=DispelMod(77130), ignoreCast=true}, -- Purify Spirit
-}
-
-ZT.typeToTrackedSpells["EXTERNAL"] = {
-	{spellID=196718, specs={DH.Havoc}, baseCD=180}, -- Darkness
-	{spellID=102342, specs={Druid.Resto}, baseCD=60, modTalents={[62]=StaticMod("sub", 15)}}, -- Ironbark
-	{spellID=116849, specs={Monk.MW}, baseCD=120}, -- Life Cocoon
-	{spellID=31821, specs={Paladin.Holy}, baseCD=180}, -- Aura Mastery
-	{spellID=6940, specs={Paladin.Holy,Paladin.Prot}, baseCD=120}, -- Blessing of Sacrifice
-	{spellID=1022, specs={Paladin.Holy,Paladin.Ret}, baseCD=300}, -- Blessing of Protection
-	{spellID=204150, specs={Paladin.Prot}, baseCD=180, reqTalents={63}, version=6}, -- Aegis of Light
-	{spellID=1022, specs={Paladin.Prot}, baseCD=300, reqTalents={41,42}}, -- Blessing of Protection
-	{spellID=204018, specs={Paladin.Prot}, baseCD=180, reqTalents={43}}, -- Blessing of Spellwarding
-	{spellID=62618, specs={Priest.Disc}, baseCD=180, reqTalents={71,73}}, -- Power Word: Barrier
-	{spellID=271466, specs={Priest.Disc}, baseCD=180, reqTalents={72}}, -- Luminous Barrier
-	{spellID=33206, specs={Priest.Disc}, baseCD=180}, -- Pain Supression
-	{spellID=47788, specs={Priest.Holy}, baseCD=180, modTalents={[32]=modGuardianSpirit}}, -- Guardian Spirit
-	{spellID=98008, specs={Shaman.Resto}, baseCD=180}, -- Spirit Link Totem
-	{spellID=97462, class=Warrior, baseCD=180}, -- Rallying Cry
-}
-
-ZT.typeToTrackedSpells["HEALING"] = {
-	{spellID=33891, specs={Druid.Resto}, baseCD=180, reqTalents={53}, ignoreCast=true, mods=EventRemainingMod("SPELL_AURA_APPLIED",117679,180), version=6}, -- Incarnation: Tree of Life
-	{spellID=740, specs={Druid.Resto}, baseCD=180, modTalents={[61]=StaticMod("sub", 60)}}, -- Tranquility
-	{spellID=198664, specs={Monk.MW}, baseCD=180, reqTalents={63}, version=6}, -- Invoke Chi-Ji, the Red Crane
-	{spellID=115310, specs={Monk.MW}, baseCD=180}, -- Revival
-	{spellID=216331, specs={Paladin.Holy}, baseCD=120, reqTalents={62}}, -- Avenging Crusader
-	{spellID=105809, specs={Paladin.Holy}, baseCD=90, reqTalents={53}}, -- Holy Avenger
-	{spellID=633, specs={Paladin.Holy}, baseCD=600, modTalents={[21]=StaticMod("mul", 0.7)}}, -- Lay on Hands
-	{spellID=633, specs={Paladin.Prot,Paladin.Ret}, baseCD=600, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Lay on Hands
-	{spellID=210191, specs={Paladin.Ret}, baseCD=60, charges=2, reqTalents={63}, version=6}, -- Word of Glory
-	{spellID=47536, specs={Priest.Disc}, baseCD=90}, -- Rapture
-	{spellID=246287, specs={Priest.Disc}, baseCD=90, reqTalents={73}}, -- Evangelism
-	{spellID=64843, specs={Priest.Holy}, baseCD=180}, -- Divine Hymn
-	{spellID=200183, specs={Priest.Holy}, baseCD=120, reqTalents={72}}, -- Apotheosis
-	{spellID=265202, specs={Priest.Holy}, baseCD=720, reqTalents={73}, mods={CastDeltaMod(34861,-30), CastDeltaMod(2050,-30)}}, -- Holy Word: Salvation
-	{spellID=15286, specs={Priest.Shadow}, baseCD=120, modTalents={[22]=StaticMod("sub", 45)}}, -- Vampiric Embrace
-	{spellID=108280, specs={Shaman.Resto}, baseCD=180}, -- Healing Tide Totem
-	{spellID=198838, specs={Shaman.Resto}, baseCD=60, reqTalents={42}}, -- Earthen Wall Totem
-	{spellID=207399, specs={Shaman.Resto}, baseCD=300, reqTalents={43}}, -- Ancestral Protection Totem
-	{spellID=114052, specs={Shaman.Resto}, baseCD=180, reqTalents={73}}, -- Ascendance
-}
-
-ZT.typeToTrackedSpells["UTILITY"] = {
-	{spellID=205636, specs={Druid.Balance}, baseCD=60, reqTalents={13}}, -- Force of Nature (Treants)
-	{spellID=29166, specs={Druid.Balance,Druid.Resto}, baseCD=180}, -- Innervate
-	{spellID=106898, specs={Druid.Feral}, baseCD=120, version=2}, -- Stampeding Roar
-	{spellID=106898, specs={Druid.Guardian}, baseCD=60, version=2}, -- Stampeding Roar
-	{spellID=5384, class=Hunter, baseCD=30, version=6}, -- Feign Death
-	{spellID=116841, class=Monk, baseCD=30, reqTalents={23}, version=6}, -- Tiger's Lust
-	{spellID=1044, class=Paladin, baseCD=25, version=6}, -- Blessing of Freedom
-	{spellID=73325, class=Priest, baseCD=90}, -- Leap of Faith
-	{spellID=64901, specs={Priest.Holy}, baseCD=300}, -- Symbol of Hope
-	{spellID=114018, class=Rogue, baseCD=360}, -- Shroud of Concealment
-	{spellID=198103, class=Shaman, baseCD=300, version=2}, -- Earth Elemental
-	{spellID=8143, class=Shaman, baseCD=60, version=6}, -- Tremor Totem
-	{spellID=192077, class=Shaman, baseCD=120, reqTalents={53}, version=2}, -- Wind Rush Totem
-	{spellID=58984, race="NightElf", baseCD=120, version=3}, -- Shadowmeld
-}
-
-ZT.typeToTrackedSpells["PERSONAL"] = {
-	{spellID=198589, specs={DH.Havoc}, baseCD=60, mods=EventRemainingMod("SPELL_AURA_APPLIED", 212800, 60)}, -- Blur
-	{spellID=187827, specs={DH.Veng}, baseCD=180}, -- Metamorphosis
-	{spellID=48792, class=DK, baseCD=180}, -- Icebound Fortitude
-	{spellID=48707, specs={DK.Blood}, baseCD=60, modTalents={[42]=StaticMod("sub", 15)}}, -- Anti-Magic Shell
-	{spellID=55233, specs={DK.Blood}, baseCD=90, modTalents={[72]=ResourceSpendingMods(DK.Blood, 0.1)}}, -- Vampiric Blood
-	{spellID=48707, specs={DK.Frost,DK.Unholy}, baseCD=60}, -- Anti-Magic Shell
-	{spellID=48743, specs={DK.Frost,DK.Unholy}, baseCD=120, reqTalents={53}}, -- Death Pact
-	{spellID=22812, specs={Druid.Balance,Druid.Guardian,Druid.Resto}, baseCD=60}, -- Barkskin
-	{spellID=108238, specs={Druid.Balance,Druid.Feral,Druid.Resto}, baseCD=90, reqTalents={22}, version=6}, -- Renewal
-	{spellID=61336, specs={Druid.Feral,Druid.Guardian}, baseCD=180, charges=2, version=6}, -- Survival Instincts
-	{spellID=109304, class=Hunter, baseCD=120}, -- Exhilaration
-	{spellID=235219, specs={Mage.Frost}, baseCD=300}, -- Cold Snap
-	{spellID=122278, class=Monk, baseCD=120, reqTalents={53}}, -- Dampen Harm
-	{spellID=122281, specs={Monk.BRM}, baseCD=30, charges=2, reqTalents={52}, version=6}, -- Healing Elixir
-	{spellID=115203, specs={Monk.BRM}, baseCD=420}, -- Fortifying Brew
-	{spellID=115176, specs={Monk.BRM}, baseCD=300}, -- Zen Meditation
-	{spellID=243435, specs={Monk.MW}, baseCD=90}, -- Fortifying Brew
-	{spellID=122281, specs={Monk.MW}, baseCD=30, charges=2, reqTalents={51}, version=6}, -- Healing Elixir
-	{spellID=122783, specs={Monk.MW, Monk.WW}, baseCD=90, reqTalents={52}}, -- Diffuse Magic
-	{spellID=122470, specs={Monk.WW}, baseCD=90}, -- Touch of Karma
-	{spellID=498, specs={Paladin.Holy}, baseCD=60}, -- Divine Protection
-	{spellID=31850, specs={Paladin.Prot}, baseCD=120, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Ardent Defender
-	{spellID=86659, specs={Paladin.Prot}, baseCD=300, version=5}, -- Guardian of the Ancient Kings
-	{spellID=184662, specs={Paladin.Ret}, baseCD=120, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Shield of Vengeance
-	{spellID=205191, specs={Paladin.Ret}, baseCD=60, reqTalents={53}}, -- Eye for an Eye
-	{spellID=19236, specs={Priest.Disc, Priest.Holy}, baseCD=90}, -- Desperate Prayer
-	{spellID=47585, specs={Priest.Shadow}, baseCD=120}, -- Dispersion
-	{spellID=199754, specs={Rogue.Outlaw}, baseCD=120, version=2}, -- Riposte
-	{spellID=5277, specs={Rogue.Sin, Rogue.Sub}, baseCD=120, version=2}, -- Evasion
-	{spellID=108271, class=Shaman, baseCD=90}, -- Astral Shift
-	{spellID=108416, class=Warlock, baseCD=60, reqTalents={33}, version=6}, -- Dark Pact
-	{spellID=104773, class=Warlock, baseCD=180}, -- Unending Resolve
-	{spellID=118038, specs={Warrior.Arms}, baseCD=180}, -- Die by the Sword
-	{spellID=184364, specs={Warrior.Fury}, baseCD=120}, -- Enraged Regeneration
-	{spellID=12975, specs={Warrior.Prot}, baseCD=180, modTalents={[43]=StaticMod("sub", 60), [71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Last Stand
-	{spellID=871, specs={Warrior.Prot}, baseCD=240, modTalents={[71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Shield Wall
-}
-
-ZT.typeToTrackedSpells["IMMUNITY"] = {
-	{spellID=196555, specs={DH.Havoc}, baseCD=120, reqTalents={43}}, -- Netherwalk
-	{spellID=186265, class=Hunter, baseCD=180, modTalents={[51]=StaticMod("mul", 0.8)}}, -- Aspect of the Turtle
-	{spellID=45438, specs={Mage.Arcane,Mage.Fire}, baseCD=240}, -- Ice Block
-	{spellID=45438, specs={Mage.Frost}, baseCD=240, mods=CastRemainingMod(235219, 0)}, -- Ice Block
-	{spellID=642, specs={Paladin.Holy}, baseCD=300, modTalents={[21]=StaticMod("mul", 0.7)}}, -- Divine Shield
-	{spellID=642, specs={Paladin.Prot, Paladin.Ret}, baseCD=300, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Divine Shield
-	{spellID=31224, class=Rogue, baseCD=120}, -- Cloak of Shadows
-}
-
-ZT.typeToTrackedSpells["DAMAGE"] = {
-	{spellID=191427, specs={DH.Havoc}, baseCD=240}, -- Metamorphosis
-	{spellID=258925, specs={DH.Havoc}, baseCD=60, reqTalents={33}}, -- Fel Barrage
-	{spellID=206491, specs={DH.Havoc}, baseCD=120, reqTalents={73}}, -- Nemesis
-	{spellID=47568, specs={DK.Frost}, baseCD=120, version=6}, -- Empower Rune Weapon
-	{spellID=279302, specs={DK.Frost}, baseCD=180, reqTalents={63}}, -- Frostwyrm's Fury
-	{spellID=152279, specs={DK.Frost}, baseCD=120, reqTalents={73}}, -- Breath of Sindragosaa
-	{spellID=275699, specs={DK.Unholy}, baseCD=90, modTalents={[71]={CastDeltaMod(47541,-1), CastDeltaMod(207317,-1)}}, version=6}, -- Apocalypse
-	{spellID=42650, specs={DK.Unholy}, baseCD=480, modTalents={[71]={CastDeltaMod(47541,-5), CastDeltaMod(207317,-5)}}}, -- Army of the Dead
-	{spellID=49206, specs={DK.Unholy}, baseCD=180, reqTalents={73}}, -- Summon Gargoyle
-	{spellID=207289, specs={DK.Unholy}, baseCD=75, reqTalents={72}}, -- Unholy Frenzy
-	{spellID=194223, specs={Druid.Balance}, baseCD=180, reqTalents={51,52}}, -- Celestial Alignment
-	{spellID=202770, specs={Druid.Balance}, baseCD=60, reqTalents={72}, version=6}, -- Fury of Elune
-	{spellID=102560, specs={Druid.Balance}, baseCD=180, reqTalents={53}}, -- Incarnation: Chosen of Elune
-	{spellID=106951, specs={Druid.Feral}, baseCD=180, version=3}, -- Berserk
-	{spellID=102543, specs={Druid.Feral}, baseCD=180, reqTalents={53}}, -- Incarnation: King of the Jungle
-	{spellID=19574, specs={Hunter.BM}, baseCD=90, mods=CastDeltaMod(217200,-12)}, -- Bestial Wrath
-	{spellID=193530, specs={Hunter.BM}, baseCD=120}, -- Aspect of the Wild
-	{spellID=201430, specs={Hunter.BM}, baseCD=180, reqTalents={63}}, -- Stampede
-	{spellID=288613, specs={Hunter.MM}, baseCD=120, version=3}, -- Trueshot
-	{spellID=266779, specs={Hunter.SV}, baseCD=120}, -- Coordinated Assault
-	{spellID=55342, class=Mage, baseCD=120, reqTalents={32}}, -- Mirror Image
-	{spellID=12042, specs={Mage.Arcane}, baseCD=90}, -- Arcane Power
-	{spellID=190319, specs={Mage.Fire}, baseCD=120}, -- Combustion
-	{spellID=12472, specs={Mage.Frost}, baseCD=180}, -- Icy Veins
-	{spellID=115080, specs={Monk.WW}, baseCD=120}, -- Touch of Death
-	{spellID=123904, specs={Monk.WW}, baseCD=180, reqTalents={63}}, -- Invoke Xuen, the White Tiger
-	{spellID=137639, specs={Monk.WW}, baseCD=90, charges=2, reqTalents={71, 72}, version=6}, -- Storm, Earth, and Fire
-	{spellID=152173, specs={Monk.WW}, baseCD=90, reqTalents={73}}, -- Serenity
-	{spellID=152262, specs={Paladin.Prot}, baseCD=45, reqTalents={73}, version=6}, -- Seraphim
-	{spellID=31884, specs={Paladin.Prot}, baseCD=120, version=6}, -- Avenging Wrath
-	{spellID=31884, specs={Paladin.Ret}, baseCD=120, reqTalents={71,73}}, -- Avenging Wrath
-	{spellID=231895, specs={Paladin.Ret}, baseCD=120, reqTalents={72}}, -- Crusade
-	{spellID=280711, specs={Priest.Shadow}, baseCD=60, reqTalents={72}}, -- Dark Ascension
-	{spellID=193223, specs={Priest.Shadow}, baseCD=180, reqTalents={73}}, -- Surrender to Madness
-	{spellID=13750, specs={Rogue.Outlaw}, baseCD=180}, -- Adrenaline Rush
-	{spellID=51690, specs={Rogue.Outlaw}, baseCD=120, reqTalents={73}}, -- Killing Spree
-	{spellID=79140, specs={Rogue.Sin}, baseCD=120}, -- Vendetta
-	{spellID=121471, specs={Rogue.Sub}, baseCD=180}, -- Shadow Blades
-	{spellID=114050, specs={Shaman.Ele}, baseCD=180, reqTalents={73}}, -- Ascendance
-	{spellID=192249, specs={Shaman.Ele}, baseCD=150, reqTalents={42}, version=3}, -- Storm Elemental
-	{spellID=191634, specs={Shaman.Ele}, baseCD=60, reqTalents={72}, version=3}, -- Stormkeeper
-	{spellID=114051, specs={Shaman.Enh}, baseCD=180, reqTalents={73}}, -- Ascendance
-	{spellID=51533, specs={Shaman.Enh}, baseCD=180, modTalents={[71]=StaticMod("sub", 30)}, version=6}, -- Feral Spirit
-	{spellID=205180, specs={Warlock.Affl}, baseCD=180}, -- Summon Darkglare
-	{spellID=113860, specs={Warlock.Affl}, baseCD=120, reqTalents={73}}, -- Dark Soul: Misery
-	{spellID=265187, specs={Warlock.Demo}, baseCD=90}, -- Summon Demonic Tyrant
-	{spellID=267217, specs={Warlock.Demo}, baseCD=180, reqTalents={73}}, -- Nether Portal
-	{spellID=113858, specs={Warlock.Destro}, baseCD=120, reqTalents={73}}, -- Dark Soul: Instability
-	{spellID=1122, specs={Warlock.Destro}, baseCD=180}, -- Summon Infernal
-	{spellID=227847, specs={Warrior.Arms}, baseCD=90, modTalents={[71]=ResourceSpendingMods(Warrior.Arms, 0.05)}}, -- Bladestorm
-	{spellID=107574, specs={Warrior.Arms}, baseCD=120, reqTalents={62}}, -- Avatar
-	{spellID=1719, specs={Warrior.Fury}, baseCD=90, modTalents={[72]=ResourceSpendingMods(Warrior.Fury, 0.05)}}, -- Recklessness
-	{spellID=46924, specs={Warrior.Fury}, baseCD=60, reqTalents={63}}, -- Bladestorm
-	{spellID=107574, specs={Warrior.Prot}, baseCD=120, reqTalents={62}, modTalents={[71]=ResourceSpendingMods(Warrior.Prot, 0.1)}, version=6}, -- Avatar
-}
-
-ZT.typeToTrackedSpells["TANK"] = {
-	{spellID=206931, specs={DK.Blood}, baseCD=30, reqTalents={12}, version=6}, -- Blooddrinker
-	{spellID=274156, specs={DK.Blood}, baseCD=45, reqTalents={23}, version=6}, -- Consumption
-	{spellID=49028, specs={DK.Blood}, baseCD=120}, -- Dancing Rune Weapon
-	{spellID=194679, specs={DK.Blood}, baseCD=25, charges=2, reqTalents={43}, version=6}, -- Rune Tap
-	{spellID=194844, specs={DK.Blood}, baseCD=60, reqTalents={73}}, -- Bonestorm
-	{spellID=212084, specs={DH.Veng}, baseCD=60, reqTalents={63}, version=6}, -- Fel Devastation
-	{spellID=204021, specs={DH.Veng}, baseCD=60}, -- Fiery Brand
-	{spellID=102558, specs={Druid.Guardian}, baseCD=180, reqTalents={53}, version=6}, -- Incarnation: Guardian of Ursoc
-	{spellID=132578, specs={Monk.BRM}, baseCD=180, reqTalents={63}, version=4}, -- Invoke Niuzao
-	{spellID=1160, specs={Warrior.Prot}, baseCD=45, modTalents={[71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Demoralizing Shout
-	{spellID=228920, specs={Warrior.Prot}, baseCD=60, reqTalents={73}, version=6}, -- Ravager
-	{spellID=23920, specs={Warrior.Prot}, baseCD=25, version=6}, -- Spell Reflection
+ZT.spellsVersion = 7
+ZT.spells = {
+	-- Interrupts
+	{type="INTERRUPT", spellID=183752, class=DH, baseCD=15}, -- Disrupt
+	{type="INTERRUPT", spellID=47528, class=DK, baseCD=15}, -- Mind Freeze
+	{type="INTERRUPT", spellID=91802, specs={DK.Unholy}, baseCD=30}, -- Shambling Rush
+	{type="INTERRUPT", spellID=78675, specs={Druid.Balance}, baseCD=60}, -- Solar Beam
+	{type="INTERRUPT", spellID=106839, specs={Druid.Feral, Druid.Guardian}, baseCD=15}, -- Skull Bash
+	{type="INTERRUPT", spellID=147362, specs={Hunter.BM, Hunter.MM}, baseCD=24}, -- Counter Shot
+	{type="INTERRUPT", spellID=187707, specs={Hunter.SV}, baseCD=15}, -- Muzzle
+	{type="INTERRUPT", spellID=2139, class=Mage, baseCD=24}, -- Counter Spell
+	{type="INTERRUPT", spellID=116705, specs={Monk.WW, Monk.BRM}, baseCD=15}, -- Spear Hand Strike
+	{type="INTERRUPT", spellID=96231, specs={Paladin.Prot, Paladin.Ret}, baseCD=15}, -- Rebuke
+	{type="INTERRUPT", spellID=15487, specs={Priest.Shadow}, baseCD=45, modTalents={[41]=StaticMod("sub", 15)}}, -- Silence
+	{type="INTERRUPT", spellID=1766, class=Rogue, baseCD=15}, -- Kick
+	{type="INTERRUPT", spellID=57994, class=Shaman, baseCD=12}, -- Wind Shear
+	{type="INTERRUPT", spellID=19647, class=Warlock, baseCD=24}, -- Spell Lock
+	{type="INTERRUPT", spellID=6552, class=Warrior, baseCD=15}, -- Pummel
+	-- Hard Crowd Control (AOE)
+	{type="HARDCC", spellID=179057, specs={DH.Havoc}, baseCD=60, modTalents={[61]=StaticMod("mul", 0.666667)}}, -- Chaos Nova
+	{type="HARDCC", spellID=119381, class=Monk, baseCD=60, modTalents={[41]=StaticMod("sub", 10)}}, -- Leg Sweep
+	{type="HARDCC", spellID=192058, class=Shaman, baseCD=60, modTalents={[33]=modCapTotem}}, -- Capacitor Totem
+	{type="HARDCC", spellID=30283, class=Warlock, baseCD=60, modTalents={[51]=StaticMod("sub", 15)}}, -- Shadowfury
+	{type="HARDCC", spellID=46968, specs={Warrior.Prot}, baseCD=40, modTalents={[52]=modShockwave}}, -- Shockwave
+	{type="HARDCC", spellID=255654, race="HighmountainTauren", baseCD=120}, -- Bull Rush
+	{type="HARDCC", spellID=20549, race="Tauren", baseCD=90}, -- War Stomp
+	-- Soft Crowd Control (AOE)
+	{type="SOFTCC", spellID=202138, specs={DH.Veng}, baseCD=90, reqTalents={53}}, -- Sigil of Chains
+	{type="SOFTCC", spellID=207684, specs={DH.Veng}, baseCD=90, modTalents={[52]=StaticMod("mul", 0.8)}}, -- Sigil of Misery
+	{type="SOFTCC", spellID=202137, specs={DH.Veng}, baseCD=60, modTalents={[52]=StaticMod("mul", 0.8)}}, -- Sigil of Silence
+	{type="SOFTCC", spellID=108199, specs={DK.Blood}, baseCD=120, modTalents={[52]=StaticMod("sub", 30)}}, -- Gorefiend's Grasp
+	{type="SOFTCC", spellID=207167, specs={DK.Frost}, baseCD=60, reqTalents={33}}, -- Blinding Sleet
+	{type="SOFTCC", spellID=132469, class=Druid, baseCD=30, reqTalents={43}}, -- Typhoon
+	{type="SOFTCC", spellID=102359, class=Druid, baseCD=30, reqTalents={42}}, -- Mass Entanglement
+	{type="SOFTCC", spellID=99, specs={Druid.Guardian}, baseCD=30}, -- Incapacitating Roar
+	{type="SOFTCC", spellID=102793, specs={Druid.Guardian}, baseCD=60, reqTalents={22}}, -- Ursol's Vortex
+	{type="SOFTCC", spellID=102793, specs={Druid.Resto}, baseCD=60}, -- Ursol's Vortex
+	{type="SOFTCC", spellID=109248, class=Hunter, baseCD=30, reqTalents={53}}, -- Binding Shot
+	{type="SOFTCC", spellID=122, class=Mage, baseCD=30, reqTalents={51,53}, mods=CastRemainingMod(235219,0), version=6}, -- Frost Nova
+	{type="SOFTCC", spellID=122, class=Mage, baseCD=30, charges=2, reqTalents={52}, mods=CastRemainingMod(235219,0), version=6}, -- Frost Nova
+	{type="SOFTCC", spellID=113724, class=Mage, baseCD=30, reqTalents={53}, version=6}, -- Ring of Frost
+	{type="SOFTCC", spellID=31661, specs={Mage.Fire}, baseCD=20, version=2}, -- Dragon's Breath
+	{type="SOFTCC", spellID=33395, specs={Mage.Frost}, baseCD=25, reqTalents={11,13}, version=6}, -- Freeze (Pet)
+	{type="SOFTCC", spellID=116844, class=Monk, baseCD=45, reqTalents={43}}, -- Ring of Peace
+	{type="SOFTCC", spellID=115750, class=Paladin, baseCD=90, reqTalents={33}, version=3}, -- Blinding Light
+	{type="SOFTCC", spellID=8122, specs={Priest.Disc, Priest.Holy}, baseCD=60, modTalents={[41]=StaticMod("sub", 30)}}, -- Psychic Scream
+	{type="SOFTCC", spellID=204263, specs={Priest.Disc, Priest.Holy}, baseCD=45, reqTalents={43}}, -- Shining Force
+	{type="SOFTCC", spellID=8122, specs={Priest.Shadow}, baseCD=60}, -- Psychic Scream
+	{type="SOFTCC", spellID=51490, specs={Shaman.Ele}, baseCD=45}, -- Thunderstorm
+	-- Hard Crowd Control (Single Target)
+	{type="STHARDCC", spellID=211881, specs={DH.Havoc}, baseCD=30, reqTalents={63}}, -- Fel Eruption
+	{type="STHARDCC", spellID=221562, specs={DK.Blood}, baseCD=45}, -- Asphyxiate
+	{type="STHARDCC", spellID=108194, specs={DK.FrostDK}, baseCD=45, reqTalents={32}}, -- Asphyxiate
+	{type="STHARDCC", spellID=108194, specs={DK.Unholy}, baseCD=45, reqTalents={33}}, -- Asphyxiate
+	{type="STHARDCC", spellID=5211, class=Druid, baseCD=50, reqTalents={41}}, -- Mighty Bash
+	{type="STHARDCC", spellID=19577, specs={Hunter.BM, Hunter.Surv}, baseCD=60}, -- Intimidation
+	{type="STHARDCC", spellID=853, specs={Paladin.Holy}, baseCD=60, modTalents={[31]=CastDeltaMod(275773, -10)}}, -- Hammer of Justice
+	{type="STHARDCC", spellID=853, specs={Paladin.Prot}, baseCD=60, modTalents={[31]=CastDeltaMod(275779, -6)}}, -- Hammer of Justice
+	{type="STHARDCC", spellID=853, specs={Paladin.Ret}, baseCD=60}, -- Hammer of Justice
+	{type="STHARDCC", spellID=88625, specs={Priest.Holy}, baseCD=60, reqTalents={42}, mods=CastDeltaMod(585, -4), modTalents={[71]=CastDeltaMod(585, -1.333333)}}, -- Holy Word: Chastise
+	{type="STHARDCC", spellID=64044, specs={Priest.Shadow}, baseCD=45, reqTalents={43}}, -- Psychic Horror
+	{type="STHARDCC", spellID=6789, class=Warlock, baseCD=45, reqTalents={52}}, -- Mortal Coil
+	{type="STHARDCC", spellID=107570, specs={Warrior.Arms,Warrior.Fury}, baseCD=30, reqTalents={23}}, -- Storm Bolt
+	{type="STHARDCC", spellID=107570, specs={Warrior.Prot}, baseCD=30, reqTalents={53}}, -- Storm Bolt
+	-- Soft Crowd Control (Single Target)
+	{type="STSOFTCC", spellID=217832, class=DH, baseCD=45}, -- Imprison
+	{type="STSOFTCC", spellID=49576, specs={DK.Blood}, baseCD=15, version=2}, -- Death Grip
+	{type="STSOFTCC", spellID=49576, specs={DK.Frost, DK.Unholy}, baseCD=25, version=2}, -- Death Grip
+	{type="STSOFTCC", spellID=2094, specs={Rogue.Outlaw}, baseCD=120, modTalents={[52]=StaticMod("sub", 30)}}, -- Blind
+	{type="STSOFTCC", spellID=2094, specs={Rogue.Sin, Rogue.Sub}, baseCD=120}, -- Blind
+	{type="STSOFTCC", spellID=115078, class=Monk, baseCD=45}, -- Paralysis
+	{type="STSOFTCC", spellID=187650, class=Hunter, baseCD=30}, -- Freezing Trap
+	{type="STSOFTCC", spellID=107079, race="Pandaren", baseCD=120, version=4}, -- Quaking Palm
+	-- Dispel (Offensive)
+	{type="DISPEL", spellID=278326, class=DH, baseCD=10, version=6}, -- Disrupt
+	{type="DISPEL", spellID=2908, class=Druid, baseCD=10, version=6}, -- Soothe
+	{type="DISPEL", spellID=32375, class=Priest, baseCD=45}, -- Mass Dispel
+	{type="DISPEL", spellID=202719, race="BloodElf", class=DH, baseCD=120}, -- Arcane Torrent
+	{type="DISPEL", spellID=50613, race="BloodElf", class=DK, baseCD=120}, -- Arcane Torrent
+	{type="DISPEL", spellID=80483, race="BloodElf", class=Hunter, baseCD=120}, -- Arcane Torrent
+	{type="DISPEL", spellID=28730, race="BloodElf", class=Mage, baseCD=120}, -- Arcane Torrent
+	{type="DISPEL", spellID=129597, race="BloodElf", class=Monk, baseCD=120}, -- Arcane Torrent
+	{type="DISPEL", spellID=155145, race="BloodElf", class=Paladin, baseCD=120}, -- Arcane Torrent
+	{type="DISPEL", spellID=232633, race="BloodElf", class=Priest, baseCD=120}, -- Arcane Torrent
+	{type="DISPEL", spellID=25046, race="BloodElf", class=Rogue, baseCD=120}, -- Arcane Torrent
+	{type="DISPEL", spellID=28730, race="BloodElf", class=Warlock, baseCD=120}, -- Arcane Torrent
+	{type="DISPEL", spellID=69179, race="BloodElf", class=Warrior, baseCD=120}, -- Arcane Torrent
+	-- Dispel (Defensive, Magic)
+	{type="DEFMDISPEL", spellID=88423, specs={Druid.Resto}, baseCD=8, mods=DispelMod(88423), ignoreCast=true}, -- Nature's Cure
+	{type="DEFMDISPEL", spellID=115450, specs={Monk.MW}, baseCD=8, mods=DispelMod(115450), ignoreCast=true}, -- Detox
+	{type="DEFMDISPEL", spellID=4987, specs={Paladin.Holy}, baseCD=8, mods=DispelMod(4987), ignoreCast=true}, -- Cleanse
+	{type="DEFMDISPEL", spellID=527, specs={Priest.Disc, Priest.Holy}, baseCD=8, mods=DispelMod(527), ignoreCast=true}, -- Purify
+	{type="DEFMDISPEL", spellID=77130, specs={Shaman.Resto}, baseCD=8, mods=DispelMod(77130), ignoreCast=true}, -- Purify Spirit
+	-- Raid-Wide Defensives
+	{type="RAIDCD", spellID=196718, specs={DH.Havoc}, baseCD=180}, -- Darkness
+	{type="RAIDCD", spellID=31821, specs={Paladin.Holy}, baseCD=180}, -- Aura Mastery
+	{type="RAIDCD", spellID=204150, specs={Paladin.Prot}, baseCD=180, reqTalents={63}, version=6}, -- Aegis of Light
+	{type="RAIDCD", spellID=62618, specs={Priest.Disc}, baseCD=180, reqTalents={71,73}}, -- Power Word: Barrier
+	{type="RAIDCD", spellID=207399, specs={Shaman.Resto}, baseCD=300, reqTalents={43}}, -- Ancestral Protection Totem
+	{type="RAIDCD", spellID=98008, specs={Shaman.Resto}, baseCD=180}, -- Spirit Link Totem
+	{type="RAIDCD", spellID=97462, class=Warrior, baseCD=180}, -- Rallying Cry
+	-- External Defensives (Single Target)
+	{type="EXTERNAL", spellID=102342, specs={Druid.Resto}, baseCD=60, modTalents={[62]=StaticMod("sub", 15)}}, -- Ironbark
+	{type="EXTERNAL", spellID=116849, specs={Monk.MW}, baseCD=120}, -- Life Cocoon
+	{type="EXTERNAL", spellID=6940, specs={Paladin.Holy, Paladin.Prot}, baseCD=120}, -- Blessing of Sacrifice
+	{type="EXTERNAL", spellID=1022, specs={Paladin.Holy, Paladin.Ret}, baseCD=300}, -- Blessing of Protection
+	{type="EXTERNAL", spellID=1022, specs={Paladin.Prot}, baseCD=300, reqTalents={41,42}}, -- Blessing of Protection
+	{type="EXTERNAL", spellID=204018, specs={Paladin.Prot}, baseCD=180, reqTalents={43}}, -- Blessing of Spellwarding
+	{type="EXTERNAL", spellID=33206, specs={Priest.Disc}, baseCD=180}, -- Pain Supression
+	{type="EXTERNAL", spellID=47788, specs={Priest.Holy}, baseCD=180, modTalents={[32]=modGuardianSpirit}}, -- Guardian Spirit
+	-- Healing and Healing Buffs
+	{type="HEALING", spellID=33891, specs={Druid.Resto}, baseCD=180, reqTalents={53}, ignoreCast=true, mods=EventRemainingMod("SPELL_AURA_APPLIED",117679,180), version=6}, -- Incarnation: Tree of Life
+	{type="HEALING", spellID=740, specs={Druid.Resto}, baseCD=180, modTalents={[61]=StaticMod("sub", 60)}}, -- Tranquility
+	{type="HEALING", spellID=198664, specs={Monk.MW}, baseCD=180, reqTalents={63}, version=6}, -- Invoke Chi-Ji, the Red Crane
+	{type="HEALING", spellID=115310, specs={Monk.MW}, baseCD=180}, -- Revival
+	{type="HEALING", spellID=31884, specs={Paladin.Holy}, baseCD=120, reqTalents={61,63}, version=7}, -- Avenging Wrath
+	{type="HEALING", spellID=216331, specs={Paladin.Holy}, baseCD=120, reqTalents={62}}, -- Avenging Crusader
+	{type="HEALING", spellID=105809, specs={Paladin.Holy}, baseCD=90, reqTalents={53}}, -- Holy Avenger
+	{type="HEALING", spellID=633, specs={Paladin.Holy}, baseCD=600, modTalents={[21]=StaticMod("mul", 0.7)}}, -- Lay on Hands
+	{type="HEALING", spellID=633, specs={Paladin.Prot, Paladin.Ret}, baseCD=600, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Lay on Hands
+	{type="HEALING", spellID=210191, specs={Paladin.Ret}, baseCD=60, charges=2, reqTalents={63}, version=6}, -- Word of Glory
+	{type="HEALING", spellID=246287, specs={Priest.Disc}, baseCD=90, reqTalents={73}}, -- Evangelism
+	{type="HEALING", spellID=47536, specs={Priest.Disc}, baseCD=90}, -- Rapture
+	{type="HEALING", spellID=271466, specs={Priest.Disc}, baseCD=180, reqTalents={72}}, -- Luminous Barrier
+	{type="HEALING", spellID=200183, specs={Priest.Holy}, baseCD=120, reqTalents={72}}, -- Apotheosis
+	{type="HEALING", spellID=64843, specs={Priest.Holy}, baseCD=180}, -- Divine Hymn
+	{type="HEALING", spellID=265202, specs={Priest.Holy}, baseCD=720, reqTalents={73}, mods={CastDeltaMod(34861,-30), CastDeltaMod(2050,-30)}}, -- Holy Word: Salvation
+	{type="HEALING", spellID=15286, specs={Priest.Shadow}, baseCD=120, modTalents={[22]=StaticMod("sub", 45)}}, -- Vampiric Embrace
+	{type="HEALING", spellID=114052, specs={Shaman.Resto}, baseCD=180, reqTalents={73}}, -- Ascendance
+	{type="HEALING", spellID=198838, specs={Shaman.Resto}, baseCD=60, reqTalents={42}}, -- Earthen Wall Totem
+	{type="HEALING", spellID=108280, specs={Shaman.Resto}, baseCD=180}, -- Healing Tide Totem
+	-- Utility (Movement, Taunts, etc)
+	{type="UTILITY", spellID=205636, specs={Druid.Balance}, baseCD=60, reqTalents={13}}, -- Force of Nature (Treants)
+	{type="UTILITY", spellID=29166, specs={Druid.Balance, Druid.Resto}, baseCD=180}, -- Innervate
+	{type="UTILITY", spellID=106898, specs={Druid.Feral}, baseCD=120, version=2}, -- Stampeding Roar
+	{type="UTILITY", spellID=106898, specs={Druid.Guardian}, baseCD=60, version=2}, -- Stampeding Roar
+	{type="UTILITY", spellID=116841, class=Monk, baseCD=30, reqTalents={23}, version=6}, -- Tiger's Lust
+	{type="UTILITY", spellID=1044, class=Paladin, baseCD=25, version=6}, -- Blessing of Freedom
+	{type="UTILITY", spellID=73325, class=Priest, baseCD=90}, -- Leap of Faith
+	{type="UTILITY", spellID=64901, specs={Priest.Holy}, baseCD=300}, -- Symbol of Hope
+	{type="UTILITY", spellID=114018, class=Rogue, baseCD=360}, -- Shroud of Concealment
+	{type="UTILITY", spellID=198103, class=Shaman, baseCD=300, version=2}, -- Earth Elemental
+	{type="UTILITY", spellID=8143, class=Shaman, baseCD=60, version=6}, -- Tremor Totem
+	{type="UTILITY", spellID=192077, class=Shaman, baseCD=120, reqTalents={53}, version=2}, -- Wind Rush Totem
+	{type="UTILITY", spellID=58984, race="NightElf", baseCD=120, version=3}, -- Shadowmeld
+	-- Personal Defensives
+	{type="PERSONAL", spellID=198589, specs={DH.Havoc}, baseCD=60, mods=EventRemainingMod("SPELL_AURA_APPLIED", 212800, 60)}, -- Blur
+	{type="PERSONAL", spellID=48792, class=DK, baseCD=180}, -- Icebound Fortitude
+	{type="PERSONAL", spellID=48707, specs={DK.Frost, DK.Unholy}, baseCD=60}, -- Anti-Magic Shell
+	{type="PERSONAL", spellID=48707, specs={DK.Blood}, baseCD=60, modTalents={[42]=StaticMod("sub", 15)}}, -- Anti-Magic Shell
+	{type="PERSONAL", spellID=48743, specs={DK.Frost, DK.Unholy}, baseCD=120, reqTalents={53}}, -- Death Pact
+	{type="PERSONAL", spellID=22812, specs={Druid.Balance, Druid.Guardian, Druid.Resto}, baseCD=60}, -- Barkskin
+	{type="PERSONAL", spellID=108238, specs={Druid.Balance, Druid.Feral, Druid.Resto}, baseCD=90, reqTalents={22}, version=6}, -- Renewal
+	{type="PERSONAL", spellID=61336, specs={Druid.Feral,Druid.Guardian}, baseCD=180, charges=2, version=6}, -- Survival Instincts
+	{type="PERSONAL", spellID=109304, class=Hunter, baseCD=120}, -- Exhilaration
+	{type="PERSONAL", spellID=5384, class=Hunter, baseCD=30, version=6}, -- Feign Death
+	{type="PERSONAL", spellID=235219, specs={Mage.Frost}, baseCD=300}, -- Cold Snap
+	{type="PERSONAL", spellID=122278, class=Monk, baseCD=120, reqTalents={53}}, -- Dampen Harm
+	{type="PERSONAL", spellID=243435, specs={Monk.MW}, baseCD=90}, -- Fortifying Brew
+	{type="PERSONAL", spellID=122281, specs={Monk.BRM}, baseCD=30, charges=2, reqTalents={52}, version=6}, -- Healing Elixir
+	{type="PERSONAL", spellID=122281, specs={Monk.MW}, baseCD=30, charges=2, reqTalents={51}, version=6}, -- Healing Elixir
+	{type="PERSONAL", spellID=122783, specs={Monk.MW, Monk.WW}, baseCD=90, reqTalents={52}}, -- Diffuse Magic
+	{type="PERSONAL", spellID=122470, specs={Monk.WW}, baseCD=90}, -- Touch of Karma
+	{type="PERSONAL", spellID=498, specs={Paladin.Holy}, baseCD=60}, -- Divine Protection
+	{type="PERSONAL", spellID=184662, specs={Paladin.Ret}, baseCD=120, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Shield of Vengeance
+	{type="PERSONAL", spellID=205191, specs={Paladin.Ret}, baseCD=60, reqTalents={53}}, -- Eye for an Eye
+	{type="PERSONAL", spellID=19236, specs={Priest.Disc, Priest.Holy}, baseCD=90}, -- Desperate Prayer
+	{type="PERSONAL", spellID=47585, specs={Priest.Shadow}, baseCD=120}, -- Dispersion
+	{type="PERSONAL", spellID=199754, specs={Rogue.Outlaw}, baseCD=120, version=2}, -- Riposte
+	{type="PERSONAL", spellID=5277, specs={Rogue.Sin, Rogue.Sub}, baseCD=120, version=2}, -- Evasion
+	{type="PERSONAL", spellID=108271, class=Shaman, baseCD=90}, -- Astral Shift
+	{type="PERSONAL", spellID=108416, class=Warlock, baseCD=60, reqTalents={33}, version=6}, -- Dark Pact
+	{type="PERSONAL", spellID=104773, class=Warlock, baseCD=180}, -- Unending Resolve
+	{type="PERSONAL", spellID=118038, specs={Warrior.Arms}, baseCD=180}, -- Die by the Sword
+	{type="PERSONAL", spellID=184364, specs={Warrior.Fury}, baseCD=120}, -- Enraged Regeneration
+	-- Tank-Only Defensives
+	{type="TANK", spellID=212084, specs={DH.Veng}, baseCD=60, reqTalents={63}, version=6}, -- Fel Devastation
+	{type="TANK", spellID=204021, specs={DH.Veng}, baseCD=60}, -- Fiery Brand
+	{type="TANK", spellID=187827, specs={DH.Veng}, baseCD=180}, -- Metamorphosis
+	{type="TANK", spellID=206931, specs={DK.Blood}, baseCD=30, reqTalents={12}, version=6}, -- Blooddrinker
+	{type="TANK", spellID=274156, specs={DK.Blood}, baseCD=45, reqTalents={23}, version=6}, -- Consumption
+	{type="TANK", spellID=49028, specs={DK.Blood}, baseCD=120}, -- Dancing Rune Weapon
+	{type="TANK", spellID=194679, specs={DK.Blood}, baseCD=25, charges=2, reqTalents={43}, version=6}, -- Rune Tap
+	{type="TANK", spellID=194844, specs={DK.Blood}, baseCD=60, reqTalents={73}}, -- Bonestorm
+	{type="TANK", spellID=55233, specs={DK.Blood}, baseCD=90, modTalents={[72]=ResourceSpendingMods(DK.Blood, 0.1)}}, -- Vampiric Blood
+	{type="TANK", spellID=102558, specs={Druid.Guardian}, baseCD=180, reqTalents={53}, version=6}, -- Incarnation: Guardian of Ursoc
+	{type="TANK", spellID=132578, specs={Monk.BRM}, baseCD=180, reqTalents={63}, version=4}, -- Invoke Niuzao
+	{type="TANK", spellID=115203, specs={Monk.BRM}, baseCD=420}, -- Fortifying Brew
+	{type="TANK", spellID=115176, specs={Monk.BRM}, baseCD=300}, -- Zen Meditation
+	{type="TANK", spellID=31850, specs={Paladin.Prot}, baseCD=120, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Ardent Defender
+	{type="TANK", spellID=86659, specs={Paladin.Prot}, baseCD=300, version=5}, -- Guardian of the Ancient Kings
+	{type="TANK", spellID=12975, specs={Warrior.Prot}, baseCD=180, modTalents={[43]=StaticMod("sub", 60), [71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Last Stand
+	{type="TANK", spellID=871, specs={Warrior.Prot}, baseCD=240, modTalents={[71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Shield Wall
+	{type="TANK", spellID=1160, specs={Warrior.Prot}, baseCD=45, modTalents={[71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Demoralizing Shout
+	{type="TANK", spellID=228920, specs={Warrior.Prot}, baseCD=60, reqTalents={73}, version=6}, -- Ravager
+	{type="TANK", spellID=23920, specs={Warrior.Prot}, baseCD=25, version=6}, -- Spell Reflection
+	-- Immunities
+	{type="IMMUNITY", spellID=196555, specs={DH.Havoc}, baseCD=120, reqTalents={43}}, -- Netherwalk
+	{type="IMMUNITY", spellID=186265, class=Hunter, baseCD=180, modTalents={[51]=StaticMod("mul", 0.8)}}, -- Aspect of the Turtle
+	{type="IMMUNITY", spellID=45438, specs={Mage.Arcane,Mage.Fire}, baseCD=240}, -- Ice Block
+	{type="IMMUNITY", spellID=45438, specs={Mage.Frost}, baseCD=240, mods=CastRemainingMod(235219, 0)}, -- Ice Block
+	{type="IMMUNITY", spellID=642, specs={Paladin.Holy}, baseCD=300, modTalents={[21]=StaticMod("mul", 0.7)}}, -- Divine Shield
+	{type="IMMUNITY", spellID=642, specs={Paladin.Prot, Paladin.Ret}, baseCD=300, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Divine Shield
+	{type="IMMUNITY", spellID=31224, class=Rogue, baseCD=120}, -- Cloak of Shadows
+	-- Damage and Damage Buffs
+	{type="DAMAGE", spellID=191427, specs={DH.Havoc}, baseCD=240}, -- Metamorphosis
+	{type="DAMAGE", spellID=258925, specs={DH.Havoc}, baseCD=60, reqTalents={33}}, -- Fel Barrage
+	{type="DAMAGE", spellID=206491, specs={DH.Havoc}, baseCD=120, reqTalents={73}}, -- Nemesis
+	{type="DAMAGE", spellID=47568, specs={DK.Frost}, baseCD=120, version=6}, -- Empower Rune Weapon
+	{type="DAMAGE", spellID=279302, specs={DK.Frost}, baseCD=180, reqTalents={63}}, -- Frostwyrm's Fury
+	{type="DAMAGE", spellID=152279, specs={DK.Frost}, baseCD=120, reqTalents={73}}, -- Breath of Sindragosaa
+	{type="DAMAGE", spellID=275699, specs={DK.Unholy}, baseCD=90, modTalents={[71]={CastDeltaMod(47541,-1), CastDeltaMod(207317,-1)}}, version=6}, -- Apocalypse
+	{type="DAMAGE", spellID=42650, specs={DK.Unholy}, baseCD=480, modTalents={[71]={CastDeltaMod(47541,-5), CastDeltaMod(207317,-5)}}}, -- Army of the Dead
+	{type="DAMAGE", spellID=49206, specs={DK.Unholy}, baseCD=180, reqTalents={73}}, -- Summon Gargoyle
+	{type="DAMAGE", spellID=207289, specs={DK.Unholy}, baseCD=75, reqTalents={72}}, -- Unholy Frenzy
+	{type="DAMAGE", spellID=194223, specs={Druid.Balance}, baseCD=180, reqTalents={51,52}}, -- Celestial Alignment
+	{type="DAMAGE", spellID=202770, specs={Druid.Balance}, baseCD=60, reqTalents={72}, version=6}, -- Fury of Elune
+	{type="DAMAGE", spellID=102560, specs={Druid.Balance}, baseCD=180, reqTalents={53}}, -- Incarnation: Chosen of Elune
+	{type="DAMAGE", spellID=106951, specs={Druid.Feral}, baseCD=180, version=3}, -- Berserk
+	{type="DAMAGE", spellID=102543, specs={Druid.Feral}, baseCD=180, reqTalents={53}}, -- Incarnation: King of the Jungle
+	{type="DAMAGE", spellID=19574, specs={Hunter.BM}, baseCD=90, mods=CastDeltaMod(217200,-12)}, -- Bestial Wrath
+	{type="DAMAGE", spellID=193530, specs={Hunter.BM}, baseCD=120}, -- Aspect of the Wild
+	{type="DAMAGE", spellID=201430, specs={Hunter.BM}, baseCD=180, reqTalents={63}}, -- Stampede
+	{type="DAMAGE", spellID=288613, specs={Hunter.MM}, baseCD=120, version=3}, -- Trueshot
+	{type="DAMAGE", spellID=266779, specs={Hunter.SV}, baseCD=120}, -- Coordinated Assault
+	{type="DAMAGE", spellID=55342, class=Mage, baseCD=120, reqTalents={32}}, -- Mirror Image
+	{type="DAMAGE", spellID=12042, specs={Mage.Arcane}, baseCD=90}, -- Arcane Power
+	{type="DAMAGE", spellID=190319, specs={Mage.Fire}, baseCD=120}, -- Combustion
+	{type="DAMAGE", spellID=12472, specs={Mage.Frost}, baseCD=180}, -- Icy Veins
+	{type="DAMAGE", spellID=115080, specs={Monk.WW}, baseCD=120}, -- Touch of Death
+	{type="DAMAGE", spellID=123904, specs={Monk.WW}, baseCD=180, reqTalents={63}}, -- Invoke Xuen, the White Tiger
+	{type="DAMAGE", spellID=137639, specs={Monk.WW}, baseCD=90, charges=2, reqTalents={71, 72}, version=6}, -- Storm, Earth, and Fire
+	{type="DAMAGE", spellID=152173, specs={Monk.WW}, baseCD=90, reqTalents={73}}, -- Serenity
+	{type="DAMAGE", spellID=152262, specs={Paladin.Prot}, baseCD=45, reqTalents={73}, version=6}, -- Seraphim
+	{type="DAMAGE", spellID=31884, specs={Paladin.Prot}, baseCD=120, version=6}, -- Avenging Wrath
+	{type="DAMAGE", spellID=31884, specs={Paladin.Ret}, baseCD=120, reqTalents={71,73}}, -- Avenging Wrath
+	{type="DAMAGE", spellID=231895, specs={Paladin.Ret}, baseCD=120, reqTalents={72}}, -- Crusade
+	{type="DAMAGE", spellID=280711, specs={Priest.Shadow}, baseCD=60, reqTalents={72}}, -- Dark Ascension
+	{type="DAMAGE", spellID=193223, specs={Priest.Shadow}, baseCD=180, reqTalents={73}}, -- Surrender to Madness
+	{type="DAMAGE", spellID=13750, specs={Rogue.Outlaw}, baseCD=180}, -- Adrenaline Rush
+	{type="DAMAGE", spellID=51690, specs={Rogue.Outlaw}, baseCD=120, reqTalents={73}}, -- Killing Spree
+	{type="DAMAGE", spellID=79140, specs={Rogue.Sin}, baseCD=120}, -- Vendetta
+	{type="DAMAGE", spellID=121471, specs={Rogue.Sub}, baseCD=180}, -- Shadow Blades
+	{type="DAMAGE", spellID=114050, specs={Shaman.Ele}, baseCD=180, reqTalents={73}}, -- Ascendance
+	{type="DAMAGE", spellID=192249, specs={Shaman.Ele}, baseCD=150, reqTalents={42}, version=3}, -- Storm Elemental
+	{type="DAMAGE", spellID=191634, specs={Shaman.Ele}, baseCD=60, reqTalents={72}, version=3}, -- Stormkeeper
+	{type="DAMAGE", spellID=114051, specs={Shaman.Enh}, baseCD=180, reqTalents={73}}, -- Ascendance
+	{type="DAMAGE", spellID=51533, specs={Shaman.Enh}, baseCD=180, modTalents={[71]=StaticMod("sub", 30)}, version=6}, -- Feral Spirit
+	{type="DAMAGE", spellID=205180, specs={Warlock.Affl}, baseCD=180}, -- Summon Darkglare
+	{type="DAMAGE", spellID=113860, specs={Warlock.Affl}, baseCD=120, reqTalents={73}}, -- Dark Soul: Misery
+	{type="DAMAGE", spellID=265187, specs={Warlock.Demo}, baseCD=90}, -- Summon Demonic Tyrant
+	{type="DAMAGE", spellID=267217, specs={Warlock.Demo}, baseCD=180, reqTalents={73}}, -- Nether Portal
+	{type="DAMAGE", spellID=113858, specs={Warlock.Destro}, baseCD=120, reqTalents={73}}, -- Dark Soul: Instability
+	{type="DAMAGE", spellID=1122, specs={Warlock.Destro}, baseCD=180}, -- Summon Infernal
+	{type="DAMAGE", spellID=227847, specs={Warrior.Arms}, baseCD=90, modTalents={[71]=ResourceSpendingMods(Warrior.Arms, 0.05)}}, -- Bladestorm
+	{type="DAMAGE", spellID=107574, specs={Warrior.Arms}, baseCD=120, reqTalents={62}}, -- Avatar
+	{type="DAMAGE", spellID=1719, specs={Warrior.Fury}, baseCD=90, modTalents={[72]=ResourceSpendingMods(Warrior.Fury, 0.05)}}, -- Recklessness
+	{type="DAMAGE", spellID=46924, specs={Warrior.Fury}, baseCD=60, reqTalents={63}}, -- Bladestorm
+	{type="DAMAGE", spellID=107574, specs={Warrior.Prot}, baseCD=120, modTalents={[71]=ResourceSpendingMods(Warrior.Prot, 0.1)}, version=6}, -- Avatar
 }
 
 ZT.linkedSpellIDs = {
@@ -545,27 +553,6 @@ ZT.linkedSpellIDs = {
 
 ZT.separateLinkedSpellIDs = {
 	[86659] = {212641}, -- Guardian of the Ancient Kings (+Glyph)
-}
-
-ZT.sharedConfigSpellIDs = {
-	[202719] = "ArcaneTorrent",
-	[50613]  = "ArcaneTorrent",
-	[80483]  = "ArcaneTorrent",
-	[28730]  = "ArcaneTorrent",
-	[129597] = "ArcaneTorrent",
-	[155145] = "ArcaneTorrent",
-	[232633] = "ArcaneTorrent",
-	[25046]  = "ArcaneTorrent",
-	[28730]  = "ArcaneTorrent",
-	[69179]  = "ArcaneTorrent",
-	[221562] = "Asphyxiate",
-	[108194] = "Asphyxiate",
-	[5277]   = "Evasion/Riposte",
-	[199754] = "Evasion/Riposte",
-	[114050] = "Ascendance",
-	[114051] = "Ascendance",
-	[227847] = "Bladestorm",
-	[46924]  = "Bladestorm",
 }
 
 --##############################################################################
@@ -601,8 +588,7 @@ local function addCustomSpell(spellConfig, i)
 	spellConfig.version = 10000
 	spellConfig.isCustom = true
 
-	local spells = ZT.typeToTrackedSpells[spellConfig.type]
-	spells[#spells + 1] = spellConfig
+	ZT.spells[#ZT.spells + 1] = spellConfig
 end
 --[[
 for i = 1,16 do
@@ -624,9 +610,13 @@ end
 --]]
 
 --##############################################################################
--- Compiling the complete list of tracked spells
+-- Compiling the complete indexed tables of spells
 
-ZT.spellIDToInfo = {}
+ZT.spellsByRace = DefaultTable_Create(function() return DefaultTable_Create(function() return {} end) end)
+ZT.spellsByClass = DefaultTable_Create(function() return DefaultTable_Create(function() return {} end) end)
+ZT.spellsBySpec = DefaultTable_Create(function() return DefaultTable_Create(function() return {} end) end)
+ZT.spellsByType = DefaultTable_Create(function() return {} end)
+ZT.spellsByID = DefaultTable_Create(function() return {} end)
 
 local function isSpellBlacklisted(spellInfo)
 	local spellID = spellInfo.spellID
@@ -637,62 +627,66 @@ local function isSpellBlacklisted(spellInfo)
 
 	return isBlacklisted
 end
+
 -- Building a complete list of tracked spells
 function ZT:BuildSpellList()
-	self.spellIDToInfo = {}
+	for _,spellInfo in ipairs(ZT.spells) do
+		-- Making the structuring for spell info more uniform
+		spellInfo.version = spellInfo.version or 1
+		spellInfo.specs = spellInfo.specs and Map_FromTable(spellInfo.specs)
+		spellInfo.mods = Table_Create(spellInfo.mods)
+		spellInfo.modTalents = Table_Create(spellInfo.modTalents)
+		for talent,mods in pairs(spellInfo.modTalents) do
+			spellInfo.modTalents[talent] = Table_Create(mods)
+		end
 
-	for type,spells in pairs(self.typeToTrackedSpells) do
-		for _,spellInfo in ipairs(spells) do
-			spellInfo.type = type
+		spellInfo.isRegistered = false
+		spellInfo.frontends = {}
 
-			-- If no version, assign version=1
-			if not spellInfo.version then
-				spellInfo.version = 1
-			end
-
-			-- Creating a lookup map from list of valid specs
-			if spellInfo.specs then
-				local specsMap = {}
-				for _,specID in ipairs(spellInfo.specs) do
-					specsMap[specID] = true
-				end
-				spellInfo.specs = specsMap
-			end
-
-			-- Placing single modifiers inside of a array (or creating an empty array if none)
-			if not spellInfo.mods then
-				spellInfo.mods = {}
-			elseif not spellInfo.mods[1] then
-				spellInfo.mods = { spellInfo.mods }
-			end
-
-			-- Placing single talent modifiers inside of a array (or creating an empty array if none)
-			if not spellInfo.modTalents then
-				spellInfo.modTalents = {}
+		-- Indexing for faster lookups
+		local spells
+		if spellInfo.race then
+			if spellInfo.class then
+				spells = ZT.spellsByRace[spellInfo.race][spellInfo.class]
+				spells[#spells + 1] = spellInfo
 			else
-				for talent,modifiers in pairs(spellInfo.modTalents) do
-					if not modifiers[1] then
-						spellInfo.modTalents[talent] = { modifiers }
+				for _,class in pairs(AllClasses) do
+					spells = ZT.spellsByRace[spellInfo.race][class]
+					spells[#spells + 1] = spellInfo
+				end
+			end
+		elseif spellInfo.class then
+			if spellInfo.reqTalents then
+				for _,talent in ipairs(spellInfo.reqTalents) do
+					spells = ZT.spellsByClass[spellInfo.class][talent]
+					spells[#spells + 1] = spellInfo
+				end
+			else
+				spells = ZT.spellsByClass[spellInfo.class]["Base"]
+				spells[#spells + 1] = spellInfo
+			end
+		elseif spellInfo.specs then
+			for specID,_ in pairs(spellInfo.specs) do
+				if spellInfo.reqTalents then
+					for _,talent in ipairs(spellInfo.reqTalents) do
+						spells = ZT.spellsBySpec[specID][talent]
+						spells[#spells + 1] = spellInfo
 					end
+				else
+					spells = ZT.spellsBySpec[specID]["Base"]
+					spells[#spells + 1] = spellInfo
 				end
-			end
-
-			local spellID = spellInfo.spellID
-			local allSpellInfo = ZT.spellIDToInfo[spellID]
-			if not allSpellInfo then
-				allSpellInfo = {
-					type = type,
-					variants = { spellInfo },
-					isBlacklisted = isSpellBlacklisted(spellInfo),
-				}
-				ZT.spellIDToInfo[spellID] = allSpellInfo
-			else
-				local variants = allSpellInfo.variants
-				variants[#variants+1] = spellInfo
 			end
 		end
+
+		spells = ZT.spellsByType[spellInfo.type]
+		spells[#spells + 1] = spellInfo
+
+		spells = ZT.spellsByID[spellInfo.spellID]
+		spells[#spells + 1] = spellInfo
 	end
 end
+
 --##############################################################################
 -- Handling combatlog and WeakAura events by invoking specified callbacks
 
@@ -954,7 +948,7 @@ function WatchInfo:create(member, spellInfo, isHidden)
 		watchID = self.nextID,
 		member = member,
 		spellInfo = spellInfo,
-		duration = member:calcSpellCooldown(spellInfo, specInfo),
+		duration = member:calcSpellCD(spellInfo, specInfo),
 		expiration = GetTime(),
 		charges = spellInfo.charges,
 		isHidden = isHidden,
@@ -964,12 +958,6 @@ function WatchInfo:create(member, spellInfo, isHidden)
 
 	watchInfo = setmetatable(watchInfo, WatchInfoMT)
 	return watchInfo
-end
-
-function WatchInfo:updateSpellInfo(spellInfo, specInfo)
-	self.spellInfo = spellInfo
-	self.charges = spellInfo.charges
-	self.duration = self.member:calcSpellCooldown(spellInfo, specInfo)
 end
 
 function WatchInfo:sendAddEvent()
@@ -1005,18 +993,20 @@ function WatchInfo:hide()
 	end
 end
 
-function WatchInfo:unhide()
+function WatchInfo:unhide(suppressAddEvent)
 	if self.isHidden then
 		self.isHidden = false
-		self:sendAddEvent()
+		if not suppressAddEvent then
+			self:sendAddEvent()
+		end
 	end
 end
 
-function WatchInfo:toggleHidden(toggle)
+function WatchInfo:toggleHidden(toggle, suppressAddEvent)
 	if toggle then
 		self:hide()
 	else
-		self:unhide()
+		self:unhide(suppressAddEvent)
 	end
 end
 
@@ -1220,8 +1210,11 @@ function ZT:toggleCombatLogHandlers(watchInfo, enable, specInfo)
 	end
 end
 
-function ZT:watch(spellInfo, member, specInfo, isHidden)
-	specInfo = specInfo or member.specInfo
+function ZT:watch(spellInfo, member, specInfo)
+	-- Only handle registered spells (or those for the player)
+	if not spellInfo.isRegistered and not member.isPlayer then
+		return
+	end
 
 	local spellID = spellInfo.spellID
 	local spells = self.watching[spellID]
@@ -1230,16 +1223,26 @@ function ZT:watch(spellInfo, member, specInfo, isHidden)
 		self.watching[spellID] = spells
 	end
 
+	specInfo = specInfo or member.specInfo
+	local isHidden = (member.isPlayer and not spellInfo.isRegistered) or member.isHidden
+
 	local watchInfo = spells[member.GUID]
 	local isNew = (watchInfo == nil)
-
 	if not watchInfo then
 		watchInfo = WatchInfo:create(member, spellInfo, isHidden)
 		spells[member.GUID] = watchInfo
 		member.watching[spellID] = watchInfo
 	else
-		watchInfo:updateSpellInfo(spellInfo, specInfo)
-		watchInfo:toggleHidden(isHidden)
+		-- If spellInfo isn't updated, then only change visibility (if needed)
+		if watchInfo.spellInfo == spellInfo then
+			watchInfo:toggleHidden(isHidden)
+			return
+		end
+
+		watchInfo.spellInfo = spellInfo
+		watchInfo.charges = spellInfo.charges
+		watchInfo.duration = member:calcSpellCD(spellInfo, specInfo)
+		watchInfo:toggleHidden(isHidden, true) -- We will send the ZT_ADD event later
 	end
 
 	if member.isPlayer then
@@ -1264,18 +1267,21 @@ function ZT:watch(spellInfo, member, specInfo, isHidden)
 		end
 	elseif member.tracking == "CombatLog" or (member.tracking == "Sharing" and member.spellsVersion < spellInfo.version) then
 		watchInfo.ignoreSharing = true
-		if isNew then
-			self:toggleCombatLogHandlers(watchInfo, true, specInfo)
-		else
+		if not isNew then
 			self:toggleCombatLogHandlers(watchInfo, false, member.specInfo)
-			self:toggleCombatLogHandlers(watchInfo, true, specInfo)
 		end
+		self:toggleCombatLogHandlers(watchInfo, true, specInfo)
 	else
 		watchInfo.ignoreSharing = false
 	end
 end
 
-function ZT:unwatch(spellInfo, member, specInfo, keepHidden)
+function ZT:unwatch(spellInfo, member)
+	-- Only handle registered spells (or those for the player)
+	if not spellInfo.isRegistered and not member.isPlayer then
+		return
+	end
+
 	local spellID = spellInfo.spellID
 	local sources = self.watching[spellID]
 	if not sources then
@@ -1287,15 +1293,23 @@ function ZT:unwatch(spellInfo, member, specInfo, keepHidden)
 		return
 	end
 
+	-- Ignoring unwatch requests if the spellInfo doesn't match (yet spellID does)
+	-- (Note: This serves to ease updating after spec/talent changes)
+	if watchInfo.spellInfo ~= spellInfo then
+		return
+	end
+
 	if member.isPlayer and not TEST_CLEU then
-		if keepHidden then
+		-- If called due to front-end unregistration, only hide it to allow continued sharing of updates
+		-- Otherwise, called due to a spec/talent change, so actually unwatch it
+		if not spellInfo.isRegistered then
 			watchInfo:hide()
 			return
 		end
 
 		self:togglePlayerHandlers(watchInfo, false)
 	elseif member.tracking == "CombatLog"  or (member.tracking == "Sharing" and member.spellsVersion < spellInfo.version) then
-		self:toggleCombatLogHandlers(watchInfo, false, specInfo or member.specInfo)
+		self:toggleCombatLogHandlers(watchInfo, false, member.specInfo)
 	end
 
 	if watchInfo.readyTimer then
@@ -1311,77 +1325,87 @@ end
 --##############################################################################
 -- Tracking types registered by front-end WAs
 
-ZT.registration = {}
-
-function ZT:isTypeRegistered(type)
-	return self.registration[type] and (next(self.registration[type], nil) ~= nil)
-end
-
-function ZT:resendAddEvents(type)
-	for _,sources in pairs(self.watching) do
-		for _,watchInfo in pairs(sources) do
-			if (watchInfo.spellInfo.type == type) then
-				watchInfo:sendAddEvent()
-			end
-		end
-	end
-end
-
-function ZT:registerFrontEnd(type, frontendID)
-	local frontends = self.registration[type]
-	if not frontends then
-		frontends = {}
-		self.registration[type] = frontends
-	end
-
-	if not frontends[frontendID] then
-		local typeWasRegistered = self:isTypeRegistered(type)
-		self.registration[type][frontendID] = true
-
-		if typeWasRegistered then
-			prdebug(DEBUG_EVENT, "Received ZT_REGISTER", type, frontendID, "-> Registering + Resending")
-			self:resendAddEvents(type)
-		else
-			prdebug(DEBUG_EVENT, "Received ZT_REGISTER", type, frontendID, "-> Registering + Watching")
-			for _,member in pairs(self.members) do
-				if (not member.isPlayer) or (self.db.showMine[type]) then
-					for _,allSpellInfo in pairs(self.spellIDToInfo) do
-						if (not allSpellInfo.isBlacklisted) and (type == allSpellInfo.type) then
-							for _,spellInfo in pairs(allSpellInfo.variants) do
-								if member:checkSpellRequirements(spellInfo) then
-									self:watch(spellInfo, member, member.specInfo, member.isHidden)
-									break
-								end
-							end
-						end
+function ZT:registerSpells(frontendID, spells)
+	for _,spellInfo in ipairs(spells) do
+		local frontends = spellInfo.frontends
+		if next(frontends, nil) ~= nil then
+			-- Some front-end already registered for this spell, so just send ADD events
+			local watched = self.watching[spellInfo.spellID]
+			if watched then
+				for _,watchInfo in pairs(watched) do
+					if watchInfo.spellInfo == spellInfo then
+						watchInfo:sendAddEvent()
 					end
 				end
 			end
-		end
-	else
-		prdebug(DEBUG_EVENT, "Received ZT_REGISTER", type, frontendID, "-> Resending")
-		self:resendAddEvents(type)
-	end
-end
-
-function ZT:unregisterFrontEnd(type, frontendID)
-	self.registration[type][frontendID] = nil
-
-
-	if not self:isTypeRegistered(type) then
-		prdebug(DEBUG_EVENT, "Received ZT_UNREGISTER", type, frontendID, "-> Unregistering + Unwatching")
-		for _,member in pairs(self.members) do
-			for _,watchInfo in pairs(member.watching) do
-				local spellInfo = watchInfo.spellInfo
-				if spellInfo.type == type then
-					self:unwatch(spellInfo, member, member.specInfo, true)
+		else
+			-- No front-end was registered for this spell, so watch as needed
+			spellInfo.isRegistered = true
+			for _,member in pairs(self.members) do
+				if member:knowsSpell(spellInfo) then
+					self:watch(spellInfo, member)
 				end
 			end
 		end
-	else
-		prdebug(DEBUG_EVENT, "Received ZT_UNREGISTER", type, frontendID, "-> Unregistering")
+
+		frontends[frontendID] = true
 	end
 end
+
+function ZT:unregisterSpells(frontendID, spells)
+	for _,spellInfo in ipairs(spells) do
+		local frontends = spellInfo.frontends
+		frontends[frontendID] = nil
+
+		if next(frontends, nil) == nil then
+			local watched = self.watching[spellInfo.spellID]
+			if watched then
+				for _,watchInfo in pairs(watched) do
+					if watchInfo.spellInfo == spellInfo then
+						self:unwatch(spellInfo, watchInfo.member)
+					end
+				end
+			end
+			spellInfo.isRegistered = false
+		end
+	end
+end
+
+function ZT:toggleFrontEndRegistration(frontendID, info, toggle)
+	local infoType = type(info)
+	local registerFunc = toggle and self.registerSpells or self.unregisterSpells
+
+	if infoType == "string" then -- Registration info is a type
+		prdebug(DEBUG_EVENT, "Received", toggle and "ZT_REGISTER" or "ZT_UNREGISTER", "from", frontendID, "for type", info)
+		registerFunc(self, frontendID, self.spellsByType[info])
+	elseif infoType == "number" then -- Registration info is a spellID
+		prdebug(DEBUG_EVENT, "Received", toggle and "ZT_REGISTER" or "ZT_UNREGISTER", "from", frontendID, "for spellID", info)
+		registerFunc(self, frontendID, self.spellsByID[info])
+	elseif infoType == "table" then -- Registration info is a table of types or spellIDs
+		infoType = type(info[1])
+
+		if infoType == "string" then
+			prdebug(DEBUG_EVENT, "Received", toggle and "ZT_REGISTER" or "ZT_UNREGISTER", "from", frontendID, "for multiple types")
+			for _,type in ipairs(info) do
+				registerFunc(self, frontendID, self.spellsByType[type])
+			end
+		elseif infoType == "number" then
+			prdebug(DEBUG_EVENT, "Received", toggle and "ZT_REGISTER" or "ZT_UNREGISTER", "from", frontendID, "for multiple spells")
+			for _,spellID in ipairs(info) do
+				registerFunc(self, frontendID, self.spellsByID[spellID])
+			end
+		end
+	end
+end
+
+function ZT:registerFrontEnd(frontendID, info)
+	self:toggleFrontEndRegistration(frontendID, info, true)
+end
+
+function ZT:unregisterFrontEnd(frontendID, info)
+	self:toggleFrontEndRegistration(frontendID, info, false)
+end
+
 
 --##############################################################################
 -- Managing member information (e.g., spec, talents) for all group members
@@ -1419,7 +1443,7 @@ function Member:gatherInfo()
 	return self.isReady
 end
 
-function Member:checkSpellRequirements(spellInfo, specInfo)
+function Member:knowsSpell(spellInfo, specInfo)
 	specInfo = specInfo or self.specInfo
 
 	if spellInfo.race and spellInfo.race ~= self.race then
@@ -1444,7 +1468,7 @@ function Member:checkSpellRequirements(spellInfo, specInfo)
 	return false
 end
 
-function Member:calcSpellCooldown(spellInfo, specInfo)
+function Member:calcSpellCD(spellInfo, specInfo)
 	specInfo = specInfo or self.specInfo
 
 	local cooldown = spellInfo.baseCD
@@ -1503,45 +1527,85 @@ function ZT:addOrUpdateMember(memberInfo)
 
 	-- Update if the member is now ready, or if they swapped specs/talents
 	local needsUpdate = not member.isReady and member:gatherInfo()
-	if specInfo.specID and specInfo.talents then
-		if (specInfo.specID ~= member.specInfo.specID) or (specInfo.talents ~= member.specInfo.talents) then
-			needsUpdate = true
-		end
-	end
+	local needsSpecUpdate = specInfo.specID and (specInfo.specID ~= member.specInfo.specID)
+	local needsTalentUpdate = specInfo.talents and (specInfo.talents ~= member.specInfo.talents)
 
-	if needsUpdate then
+	if member.isReady and (needsUpdate or needsSpecUpdate or needsTalentUpdate) then
+		-- This handshake comes before any cooldown updates for newly watched spells
 		if member.isPlayer then
 			self:sendHandshake(specInfo)
 		end
 
-		-- Watching/Unwatching relevant spell cooldowns
-		for spellID, allSpellInfo in pairs(self.spellIDToInfo) do
-			local isRegistered = self:isTypeRegistered(allSpellInfo.type)
-			local isBlacklisted = allSpellInfo.isBlacklisted
-			local hasSpell = false
+		-- Class Spells (Base) + Race Spells
+		-- Note: These are set once and never change
+		if needsUpdate then
+			for _,spellInfo in ipairs(self.spellsByRace[member.race][member.class]) do
+				self:watch(spellInfo, member, specInfo)
+			end
 
-			if member.isPlayer then -- If player, watch all possible spells (some may be hidden)
-				for _,spellInfo in ipairs(allSpellInfo.variants) do
-					hasSpell = member:checkSpellRequirements(spellInfo, specInfo)
-					if hasSpell then
-						local isHidden = (not isRegistered) or (not self.db.showMine[allSpellInfo.type]) or isBlacklisted
-						self:watch(spellInfo, member, specInfo, isHidden)
-						break
-					end
-				end
-			elseif isRegistered and (not isBlacklisted) then -- Otherwise if group member, only watch relevant spells
-				for _,spellInfo in ipairs(allSpellInfo.variants) do
-					hasSpell = member:checkSpellRequirements(spellInfo, specInfo)
-					if hasSpell then
-						self:watch(spellInfo, member, specInfo, member.isHidden)
-						break
-					end
+			for _,spellInfo in ipairs(self.spellsByClass[member.class]["Base"]) do
+				self:watch(spellInfo, member, specInfo)
+			end
+		end
+
+		-- Class Spells (Talented)
+		if needsUpdate or needsTalentUpdate then
+			local classSpells = self.spellsByClass[member.class]
+
+			for talent,_ in pairs(specInfo.talentsMap) do
+				for _,spellInfo in ipairs(classSpells[talent]) do
+					self:watch(spellInfo, member, specInfo)
 				end
 			end
 
-			local prevWatchInfo = member.watching[spellID]
-			if not hasSpell and prevWatchInfo then
-				self:unwatch(prevWatchInfo.spellInfo, member)
+			if needsTalentUpdate then
+				for talent,_ in pairs(member.specInfo.talentsMap) do
+					if not specInfo.talentsMap[talent] then
+						for _,spellInfo in ipairs(classSpells[talent]) do
+							if not member:knowsSpell(spellInfo, specInfo) then
+								self:unwatch(spellInfo, member)
+							end
+						end
+					end
+				end
+			end
+		end
+
+		-- Specialization Spells (Base/Talented)
+		if (needsUpdate or needsSpecUpdate or needsTalentUpdate) and specInfo.specID then
+			local specSpells = self.spellsBySpec[specInfo.specID]
+
+			if needsUpdate or needsSpecUpdate then
+				for _,spellInfo in ipairs(specSpells["Base"]) do
+					self:watch(spellInfo, member, specInfo)
+				end
+			end
+			for talent,_ in pairs(specInfo.talentsMap) do
+				for _,spellInfo in ipairs(specSpells[talent]) do
+					self:watch(spellInfo, member, specInfo)
+				end
+			end
+
+			if (needsSpecUpdate or needsTalentUpdate) and member.specInfo.specID then
+				specSpells = self.spellsBySpec[member.specInfo.specID]
+
+				if needsSpecUpdate then
+					for _,spellInfo in ipairs(specSpells["Base"]) do
+						if not member:knowsSpell(spellInfo, specInfo) then
+							self:unwatch(spellInfo, member)
+						end
+					end
+				end
+
+				for talent,_ in pairs(member.specInfo.talentsMap) do
+					if not specInfo.talentsMap[talent] then
+						for _,spellInfo in ipairs(specSpells[talent]) do
+							if not member:knowsSpell(spellInfo, specInfo) then
+								self:unwatch(spellInfo, member)
+							end
+						end
+					end
+				end
 			end
 		end
 
@@ -1648,7 +1712,7 @@ local function sendMessage(message)
 	end
 
 	local channel = IsInGroup(2) and "INSTANCE_CHAT" or "RAID"
-	C_ChatInfo_SendAddonMessage("ZenTracker", message, channel)
+	C_ChatInfo.SendAddonMessage("ZenTracker", message, channel)
 end
 
 ZT.hasSentHandshake = false
@@ -1891,6 +1955,9 @@ function ZT:Init()
 	-- If prevZT exists, we know it wasn't a login or reload. If it doesn't exist,
 	-- it still might not be a login or reload if the user is installing ZenTracker
 	-- for the first time. IsLoginFinished() takes care of the second case.
+	--if prevZT or WeakAuras.IsLoginFinished() then
+	--	ZT.delayedUpdates = nil
+	--end
 
 	ZT.inspectLib.RegisterCallback(ZT, "GroupInSpecT_Update", "libInspectUpdate")
 	ZT.inspectLib.RegisterCallback(ZT, "GroupInSpecT_Remove", "libInspectRemove")

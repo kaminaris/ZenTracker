@@ -282,7 +282,7 @@ end
 --##############################################################################
 -- List of Tracked Spells
 
-ZT.spellsVersion = 7
+ZT.spellsVersion = 8
 ZT.spells = {
 	-- Interrupts
 	{type="INTERRUPT", spellID=183752, class=DH, baseCD=15}, -- Disrupt
@@ -449,7 +449,7 @@ ZT.spells = {
 	{type="PERSONAL", spellID=184662, specs={Paladin.Ret}, baseCD=120, modTalents={[51]=StaticMod("mul", 0.7)}}, -- Shield of Vengeance
 	{type="PERSONAL", spellID=205191, specs={Paladin.Ret}, baseCD=60, reqTalents={53}}, -- Eye for an Eye
 	{type="PERSONAL", spellID=19236, specs={Priest.Disc, Priest.Holy}, baseCD=90}, -- Desperate Prayer
-	{type="PERSONAL", spellID=47585, specs={Priest.Shadow}, baseCD=120}, -- Dispersion
+	{type="PERSONAL", spellID=47585, specs={Priest.Shadow}, baseCD=120, duration=6, modTalents={[23]=StaticMod("sub", 30)}, version=8}, -- Dispersion
 	{type="PERSONAL", spellID=199754, specs={Rogue.Outlaw}, baseCD=120, version=2}, -- Riposte
 	{type="PERSONAL", spellID=5277, specs={Rogue.Sin, Rogue.Sub}, baseCD=120, version=2}, -- Evasion
 	{type="PERSONAL", spellID=108271, class=Shaman, baseCD=90}, -- Astral Shift
@@ -635,9 +635,10 @@ function ZT:BuildSpellList()
 		spellInfo.version = spellInfo.version or 1
 		spellInfo.specs = spellInfo.specs and Map_FromTable(spellInfo.specs)
 		spellInfo.mods = Table_Create(spellInfo.mods)
-		spellInfo.modTalents = Table_Create(spellInfo.modTalents)
-		for talent,mods in pairs(spellInfo.modTalents) do
-			spellInfo.modTalents[talent] = Table_Create(mods)
+		if spellInfo.modTalents then
+			for talent,mods in pairs(spellInfo.modTalents) do
+				spellInfo.modTalents[talent] = Table_Create(mods)
+			end
 		end
 
 		spellInfo.isRegistered = false
@@ -662,6 +663,12 @@ function ZT:BuildSpellList()
 					spells[#spells + 1] = spellInfo
 				end
 			else
+				if spellInfo.modTalents then
+					for talent,_ in pairs(spellInfo.modTalents) do
+						spells = ZT.spellsByClass[spellInfo.class][talent]
+						spells[#spells + 1] = spellInfo
+					end
+				end
 				spells = ZT.spellsByClass[spellInfo.class]["Base"]
 				spells[#spells + 1] = spellInfo
 			end
@@ -673,10 +680,19 @@ function ZT:BuildSpellList()
 						spells[#spells + 1] = spellInfo
 					end
 				else
+					if spellInfo.modTalents then
+						for talent,_ in pairs(spellInfo.modTalents) do
+							spells = ZT.spellsBySpec[specID][talent]
+							spells[#spells + 1] = spellInfo
+						end
+					end
 					spells = ZT.spellsBySpec[specID]["Base"]
 					spells[#spells + 1] = spellInfo
 				end
 			end
+		else
+			spells = ZT.spellsByClass["None"]
+			spells[#spells + 1] = spellInfo
 		end
 
 		spells = ZT.spellsByType[spellInfo.type]
@@ -943,7 +959,7 @@ local WatchInfoMT = { __index = WatchInfo }
 
 ZT.watching = {}
 
-function WatchInfo:create(member, spellInfo, isHidden)
+function WatchInfo:create(member, specInfo, spellInfo, isHidden)
 	local watchInfo = {
 		watchID = self.nextID,
 		member = member,
@@ -952,6 +968,7 @@ function WatchInfo:create(member, spellInfo, isHidden)
 		expiration = GetTime(),
 		charges = spellInfo.charges,
 		isHidden = isHidden,
+		isLazy = spellInfo.isLazy,
 		ignoreSharing = false,
 	}
 	self.nextID = self.nextID + 1
@@ -961,7 +978,7 @@ function WatchInfo:create(member, spellInfo, isHidden)
 end
 
 function WatchInfo:sendAddEvent()
-	if not self.isHidden then
+	if not self.isLazy and not self.isHidden then
 		local spellInfo = self.spellInfo
 		prdebug(DEBUG_EVENT, "Sending ZT_ADD", spellInfo.type, self.watchID, self.member.name, spellInfo.spellID, self.duration, self.charges)
 		WeakAuras.ScanEvents("ZT_ADD", spellInfo.type, self.watchID, self.member, spellInfo.spellID, self.duration, self.charges)
@@ -973,6 +990,11 @@ function WatchInfo:sendAddEvent()
 end
 
 function WatchInfo:sendTriggerEvent()
+	if self.isLazy then
+		self.isLazy = false
+		self:sendAddEvent()
+	end
+
 	if not self.isHidden then
 		prdebug(DEBUG_EVENT, "Sending ZT_TRIGGER", self.spellInfo.type, self.watchID, self.duration, self.expiration, self.charges)
 		WeakAuras.ScanEvents("ZT_TRIGGER", self.spellInfo.type, self.watchID, self.duration, self.expiration, self.charges)
@@ -980,7 +1002,7 @@ function WatchInfo:sendTriggerEvent()
 end
 
 function WatchInfo:sendRemoveEvent()
-	if not self.isHidden then
+	if not self.isLazy and not self.isHidden then
 		prdebug(DEBUG_EVENT, "Sending ZT_REMOVE", self.spellInfo.type, self.watchID)
 		WeakAuras.ScanEvents("ZT_REMOVE", self.spellInfo.type, self.watchID)
 	end
@@ -1197,12 +1219,14 @@ function ZT:toggleCombatLogHandlers(watchInfo, enable, specInfo)
 		end
 	end
 
-	for talent, modifiers in pairs(spellInfo.modTalents) do
-		if specInfo.talentsMap[talent] then
-			for _, modifier in pairs(modifiers) do
-				if modifier.type == "Dynamic" then
-					for _,handlerInfo in ipairs(modifier.handlers) do
-						toggleHandlerFunc(self.eventHandlers, handlerInfo.type, handlerInfo.spellID, member.GUID, handlerInfo.handler, watchInfo)
+	if spellInfo.modTalents then
+		for talent, modifiers in pairs(spellInfo.modTalents) do
+			if specInfo.talentsMap[talent] then
+				for _, modifier in pairs(modifiers) do
+					if modifier.type == "Dynamic" then
+						for _,handlerInfo in ipairs(modifier.handlers) do
+							toggleHandlerFunc(self.eventHandlers, handlerInfo.type, handlerInfo.spellID, member.GUID, handlerInfo.handler, watchInfo)
+						end
 					end
 				end
 			end
@@ -1229,16 +1253,10 @@ function ZT:watch(spellInfo, member, specInfo)
 	local watchInfo = spells[member.GUID]
 	local isNew = (watchInfo == nil)
 	if not watchInfo then
-		watchInfo = WatchInfo:create(member, spellInfo, isHidden)
+		watchInfo = WatchInfo:create(member, specInfo, spellInfo, isHidden)
 		spells[member.GUID] = watchInfo
 		member.watching[spellID] = watchInfo
 	else
-		-- If spellInfo isn't updated, then only change visibility (if needed)
-		if watchInfo.spellInfo == spellInfo then
-			watchInfo:toggleHidden(isHidden)
-			return
-		end
-
 		watchInfo.spellInfo = spellInfo
 		watchInfo.charges = spellInfo.charges
 		watchInfo.duration = member:calcSpellCD(spellInfo, specInfo)
@@ -1342,7 +1360,7 @@ function ZT:registerSpells(frontendID, spells)
 			-- No front-end was registered for this spell, so watch as needed
 			spellInfo.isRegistered = true
 			for _,member in pairs(self.members) do
-				if member:knowsSpell(spellInfo) then
+				if member:knowsSpell(spellInfo) and not member.isIgnored then
 					self:watch(spellInfo, member)
 				end
 			end
@@ -1416,12 +1434,34 @@ local MemberMT = { __index = Member }
 ZT.members = {}
 ZT.inEncounter = false
 
-function Member:create(memberInfo, isHidden)
+local membersToIgnore = {}
+--if ZT.config["ignoreList"] then
+--	local ignoreListStr = trim(ZT.config["ignoreList"])
+--
+--	if ignoreListStr ~= "" then
+--		ignoreListStr = "return "..ignoreListStr
+--		local ignoreList = WeakAuras.LoadFunction(ignoreListStr, "ZenTracker Ignore List")
+--
+--		if ignoreList and (type(ignoreList) == "table") then
+--			for i,name in ipairs(ignoreList) do
+--				if type(name) == "string" then
+--					membersToIgnore[strlower(name)] = true
+--				else
+--					prerror("Ignore list entry", i, "is not a string. Skipping...")
+--				end
+--			end
+--		else
+--			prerror("Ignore list is not in the form of a table. For example: {\"Zenlia\", \"Cistara\"}")
+--		end
+--	end
+--end
+
+function Member:create(memberInfo)
 	local member = memberInfo
 	member.watching = {}
 	member.tracking = member.tracking and member.tracking or "CombatLog"
 	member.isPlayer = (member.GUID == UnitGUID("player"))
-	member.isHidden = isHidden
+	member.isHidden = false
 	member.isReady = false
 
 	return setmetatable(member, MemberMT)
@@ -1437,6 +1477,11 @@ function Member:gatherInfo()
 
 	if (self.tracking == "Sharing") and self.name then
 		prdebug(DEBUG_TRACKING, self.name, "is using ZenTracker with spellsVersion", self.spellsVersion)
+	end
+
+	if self.name and membersToIgnore[strlower(self.name)] then
+		self.isIgnored = true
+		return false
 	end
 
 	self.isReady = (self.name ~= nil) and (self.classID ~= nil) and (self.race ~= nil)
@@ -1472,14 +1517,16 @@ function Member:calcSpellCD(spellInfo, specInfo)
 	specInfo = specInfo or self.specInfo
 
 	local cooldown = spellInfo.baseCD
-	for talent,modifiers in pairs(spellInfo.modTalents) do
-		if specInfo.talentsMap[talent] then
-			for _,modifier in ipairs(modifiers) do
-				if modifier.type == "Static" then
-					if modifier.sub then
-						cooldown = cooldown - modifier.sub
-					elseif modifier.mul then
-						cooldown = cooldown * modifier.mul
+	if spellInfo.modTalents then
+		for talent,modifiers in pairs(spellInfo.modTalents) do
+			if specInfo.talentsMap[talent] then
+				for _,modifier in ipairs(modifiers) do
+					if modifier.type == "Static" then
+						if modifier.sub then
+							cooldown = cooldown - modifier.sub
+						elseif modifier.mul then
+							cooldown = cooldown * modifier.mul
+						end
 					end
 				end
 			end
@@ -1512,17 +1559,12 @@ function ZT:addOrUpdateMember(memberInfo)
 
 	local member = self.members[memberInfo.GUID]
 	if not member then
-		local isHidden
-		if self.inEncounter and (memberInfo.GUID ~= UnitGUID("player")) then
-			local _,_,_,instanceID = UnitPosition("player")
-			local _,_,_,mInstanceID = UnitPosition(self.inspectLib:GuidToUnit(memberInfo.GUID))
-			isHidden = (instanceID ~= mInstanceID)
-		else
-			isHidden = false
-		end
-
-		member = Member:create(memberInfo, isHidden)
+		member = Member:create(memberInfo)
 		self.members[member.GUID] = member
+	end
+
+	if member.isIgnored then
+		return
 	end
 
 	-- Update if the member is now ready, or if they swapped specs/talents
@@ -1534,6 +1576,24 @@ function ZT:addOrUpdateMember(memberInfo)
 		-- This handshake comes before any cooldown updates for newly watched spells
 		if member.isPlayer then
 			self:sendHandshake(specInfo)
+		end
+
+		-- If we are in an encounter, hide the member if they are outside the player's instance
+		-- (Note: Previously did this on member creation, which seemed to introduce false positives)
+		if needsUpdate and self.inEncounter and not member.isPlayer then
+			local _,_,_,instanceID = UnitPosition("player")
+			local _,_,_,mInstanceID = UnitPosition(self.inspectLib:GuidToUnit(member.GUID))
+			if instanceID ~= mInstanceID then
+				member:hide()
+			end
+		end
+
+		-- Generic Spells (i.e., no class/race/spec)
+		-- Note: These are set once and never change
+		if needsUpdate then
+			for _,spellInfo in ipairs(self.spellsByClass["None"]) do
+				self:watch(spellInfo, member, specInfo)
+			end
 		end
 
 		-- Class Spells (Base) + Race Spells
@@ -1564,6 +1624,8 @@ function ZT:addOrUpdateMember(memberInfo)
 						for _,spellInfo in ipairs(classSpells[talent]) do
 							if not member:knowsSpell(spellInfo, specInfo) then
 								self:unwatch(spellInfo, member)
+							else
+								self:watch(spellInfo, member, specInfo)
 							end
 						end
 					end
@@ -1593,6 +1655,8 @@ function ZT:addOrUpdateMember(memberInfo)
 					for _,spellInfo in ipairs(specSpells["Base"]) do
 						if not member:knowsSpell(spellInfo, specInfo) then
 							self:unwatch(spellInfo, member)
+						else
+							self:watch(spellInfo, member, specInfo)
 						end
 					end
 				end
@@ -1602,6 +1666,8 @@ function ZT:addOrUpdateMember(memberInfo)
 						for _,spellInfo in ipairs(specSpells[talent]) do
 							if not member:knowsSpell(spellInfo, specInfo) then
 								self:unwatch(spellInfo, member)
+							else
+								self:watch(spellInfo, member, specInfo)
 							end
 						end
 					end
@@ -1643,12 +1709,18 @@ end
 
 function ZT:resetEncounterCDs()
 	for _,member in pairs(self.members) do
-		if not member.isPlayer and member.tracking ~= "Sharing" then
-			for _,watchInfo in pairs(member.watching) do
-				if watchInfo.duration >= 180 then
-					watchInfo.charges = watchInfo.spellInfo.charges
-					watchInfo:updateCDRemaining(0)
-				end
+		local resetMemberCDs = not member.isPlayer and member.tracking ~= "Sharing"
+
+		for _,watchInfo in pairs(member.watching) do
+			if resetMemberCDs and watchInfo.duration >= 180 then
+				watchInfo.charges = watchInfo.spellInfo.charges
+				watchInfo:updateCDRemaining(0)
+			end
+
+			-- If spell uses lazy tracking and it was triggered, reset lazy tracking at this point
+			if watchInfo.spellInfo.isLazy and not watchInfo.isLazy then
+				watchInfo:sendRemoveEvent()
+				watchInfo.isLazy = true
 			end
 		end
 	end

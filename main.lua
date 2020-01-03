@@ -319,7 +319,7 @@ ZT.spells = {
 	{type="SOFTCC", spellID=99, specs={Druid.Guardian}, baseCD=30}, -- Incapacitating Roar
 	{type="SOFTCC", spellID=102793, specs={Druid.Guardian}, baseCD=60, reqTalents={22}}, -- Ursol's Vortex
 	{type="SOFTCC", spellID=102793, specs={Druid.Resto}, baseCD=60}, -- Ursol's Vortex
-	{type="SOFTCC", spellID=109248, class=Hunter, baseCD=30, reqTalents={53}}, -- Binding Shot
+	{type="SOFTCC", spellID=109248, class=Hunter, baseCD=45, reqTalents={53}}, -- Binding Shot
 	{type="SOFTCC", spellID=122, class=Mage, baseCD=30, reqTalents={51,53}, mods=CastRemainingMod(235219,0), version=6}, -- Frost Nova
 	{type="SOFTCC", spellID=122, class=Mage, baseCD=30, charges=2, reqTalents={52}, mods=CastRemainingMod(235219,0), version=6}, -- Frost Nova
 	{type="SOFTCC", spellID=113724, class=Mage, baseCD=30, reqTalents={53}, version=6}, -- Ring of Frost

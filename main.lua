@@ -2031,7 +2031,7 @@ function ZT:libInspectUpdate(event, GUID, unit, info)
 				talents = talents..","..index
 			end
 
-			talentsMap[index] = true
+			talentsMap[index] = talentInfo.rank and talentInfo.rank or true
 		end
 	end
 

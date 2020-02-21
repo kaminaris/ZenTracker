@@ -555,6 +555,61 @@ ZT.separateLinkedSpellIDs = {
 	[86659] = {212641}, -- Guardian of the Ancient Kings (+Glyph)
 }
 
+local isClassic = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
+
+if (isClassic) then
+	ZT.linkedSpellIDs = table.wipe(ZT.linkedSpellIDs)
+	ZT.separateLinkedSpellIDs = table.wipe(ZT.separateLinkedSpellIDs)
+	ZT.spells = {
+		-- Interrupts
+		{type="INTERRUPT", spellID=8983, class=Druid, baseCD=15}, -- Bash
+		{type="INTERRUPT", spellID=2139, class=Mage, baseCD=24}, -- Counter Spell
+		{type="INTERRUPT", spellID=15487, specs={Priest.Shadow}, baseCD=45, modTalents={[41]=StaticMod("sub", 15)}}, -- Silence
+		{type="INTERRUPT", spellID=1766, class=Rogue, baseCD=15}, -- Kick
+		{type="INTERRUPT", spellID=19647, class=Warlock, baseCD=24}, -- Spell Lock
+		{type="INTERRUPT", spellID=6552, class=Warrior, baseCD=15}, -- Pummel
+		-- Hard Crowd Control (AOE)
+		{type="HARDCC", spellID=20549, race="Tauren", baseCD=90}, -- War Stomp
+		-- Soft Crowd Control (AOE)
+		{type="SOFTCC", spellID=99, class=Druid, baseCD=30}, -- Demoralizing Roar
+		-- Hard Crowd Control (Single Target)
+		{type="STHARDCC", spellID=19577, specs={Hunter.BM}, baseCD=60}, -- Intimidation
+		-- Soft Crowd Control (Single Target)
+		{type="STSOFTCC", spellID=2094, specs={Rogue.Outlaw}, baseCD=120, modTalents={[52]=StaticMod("sub", 30)}}, -- Blind
+		{type="STSOFTCC", spellID=2094, specs={Rogue.Sin, Rogue.Sub}, baseCD=120}, -- Blind
+		{type="STSOFTCC", spellID=27753, class=Hunter, baseCD=15}, -- Freezing Trap
+		-- Dispel (Offensive)
+		{type="DISPEL", spellID=2908, class=Druid, baseCD=10}, -- Soothe Animal
+		{type="DISPEL", spellID=19801, class=Hunter, baseCD=20}, -- Tranquilizing Shot
+		-- Dispel (Defensive, Magic)
+		{type="DEFMDISPEL", spellID=4987, specs={Paladin.Holy}, baseCD=8, mods=DispelMod(4987), ignoreCast=true}, -- Cleanse
+		{type="DEFMDISPEL", spellID=527, specs={Priest.Disc, Priest.Holy}, baseCD=8, mods=DispelMod(527), ignoreCast=true}, -- Dispel
+		-- Raid-Wide Defensives
+
+		-- External Defensives (Single Target)
+		{type="EXTERNAL", spellID=1022, specs={Paladin.Holy, Paladin.Ret}, baseCD=300}, -- Blessing of Protection
+		-- Healing and Healing Buffs
+		{type="HEALING", spellID=740, specs={Druid.Resto}, baseCD=180, modTalents={[61]=StaticMod("sub", 60)}}, -- Tranquility
+		-- Utility (Movement, Taunts, etc)
+		{type="UTILITY", spellID=29166, specs={Druid.Balance, Druid.Resto}, baseCD=180}, -- Innervate
+		-- {type="UTILITY", spellID=1044, class=Paladin, baseCD=25}, -- Blessing of Freedom
+		-- {type="UTILITY", spellID=198103, class=Shaman, baseCD=300}, -- Earth Elemental
+		-- {type="UTILITY", spellID=8143, class=Shaman, baseCD=60}, -- Tremor Totem
+		{type="UTILITY", spellID=20580, race="NightElf", baseCD=120}, -- Shadowmeld
+		-- Personal Defensives
+		{type="PERSONAL", spellID=22812, specs={Druid.Balance, Druid.Guardian, Druid.Resto}, baseCD=60}, -- Barkskin
+		{type="PERSONAL", spellID=5384, class=Hunter, baseCD=30}, -- Feign Death
+		{type="PERSONAL", spellID=19263, specs={Hunter.SV}, baseCD=300, reqTalents={33}}, -- Deterrence
+		-- Tank-Only Defensives
+		{type="TANK", spellID=12975, specs={Warrior.Prot}, baseCD=180, modTalents={[43]=StaticMod("sub", 60), [71]=ResourceSpendingMods(Warrior.Prot, 0.1)}}, -- Last Stand
+		-- Immunities
+		{type="IMMUNITY", spellID=27619, specs={Mage.Arcane, Mage.Fire}, baseCD=240}, -- Ice Block
+		-- Damage and Damage Buffs
+		{type="DAMAGE", spellID=19574, specs={Hunter.BM}, baseCD=120}, -- Bestial Wrath
+		{type="DAMAGE", spellID=3045, class=Hunter, baseCD=300}, -- Rapid Fire
+	}
+end
+
 --##############################################################################
 -- Handling custom spells specified by the user in the configuration
 

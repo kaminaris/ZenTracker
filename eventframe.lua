@@ -4,6 +4,7 @@ local WeakAuras = WeakAuras;
 local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo;
 local CreateFrame = CreateFrame;
 local hooksecurefunc = hooksecurefunc;
+local isClassic = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
 
 local eventFrame = CreateFrame('Frame');
 
@@ -78,11 +79,13 @@ function eventFrame:ADDON_LOADED(event, addon)
 
 	eventFrame:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED');
 
-	eventFrame:RegisterEvent('CHALLENGE_MODE_START');
-	eventFrame:RegisterEvent('CHALLENGE_MODE_COMPLETED');
 	eventFrame:RegisterEvent('PLAYER_ENTERING_WORLD');
-	eventFrame:RegisterEvent('ENCOUNTER_START');
-	eventFrame:RegisterEvent('ENCOUNTER_END');
+  if not isClassic then
+		-- eventFrame:RegisterEvent('CHALLENGE_MODE_START');
+		-- eventFrame:RegisterEvent('CHALLENGE_MODE_COMPLETED');
+		-- eventFrame:RegisterEvent('ENCOUNTER_START');
+		-- eventFrame:RegisterEvent('ENCOUNTER_END');
+  end
 
 	eventFrame:RegisterEvent('CHAT_MSG_ADDON');
 	eventFrame:RegisterEvent('GROUP_JOINED');

@@ -86,7 +86,7 @@ function ZT:BuildOptionsFrame(parent)
 	local row
 	local columnsTaken = 0;
 
-  for _, spell in pairs(self.spells) do
+	for _, spell in pairs(self.spells) do
 		local type = spell.type;
 
 		if not oldType or type ~= oldType then
@@ -97,9 +97,9 @@ function ZT:BuildOptionsFrame(parent)
 		end
 
 		local spellName = GetSpellInfo(spell.spellID);
-    if spellName == nil then
-      prerror("Spell ID not found:", spell.spellID)
-    end
+		if spellName == nil then
+			prerror("Spell ID not found:", spell.spellID)
+		end
 		spellName = spellName:gsub('%s+', '');
 
 		if not spellNames[spellName] then

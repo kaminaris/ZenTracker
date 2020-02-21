@@ -80,12 +80,12 @@ function eventFrame:ADDON_LOADED(event, addon)
 	eventFrame:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED');
 
 	eventFrame:RegisterEvent('PLAYER_ENTERING_WORLD');
-  if not isClassic then
+	if not isClassic then
 		-- eventFrame:RegisterEvent('CHALLENGE_MODE_START');
 		-- eventFrame:RegisterEvent('CHALLENGE_MODE_COMPLETED');
 		-- eventFrame:RegisterEvent('ENCOUNTER_START');
 		-- eventFrame:RegisterEvent('ENCOUNTER_END');
-  end
+	end
 
 	eventFrame:RegisterEvent('CHAT_MSG_ADDON');
 	eventFrame:RegisterEvent('GROUP_JOINED');

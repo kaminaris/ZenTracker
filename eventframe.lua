@@ -81,10 +81,10 @@ function eventFrame:ADDON_LOADED(event, addon)
 
 	eventFrame:RegisterEvent('PLAYER_ENTERING_WORLD');
 	if not isClassic then
-		-- eventFrame:RegisterEvent('CHALLENGE_MODE_START');
-		-- eventFrame:RegisterEvent('CHALLENGE_MODE_COMPLETED');
-		-- eventFrame:RegisterEvent('ENCOUNTER_START');
-		-- eventFrame:RegisterEvent('ENCOUNTER_END');
+		eventFrame:RegisterEvent('CHALLENGE_MODE_START');
+		eventFrame:RegisterEvent('CHALLENGE_MODE_COMPLETED');
+		eventFrame:RegisterEvent('ENCOUNTER_START');
+		eventFrame:RegisterEvent('ENCOUNTER_END');
 	end
 
 	eventFrame:RegisterEvent('CHAT_MSG_ADDON');

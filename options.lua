@@ -78,44 +78,49 @@ function ZT:BuildOptionsFrame(parent)
 	StdUi:EasyLayout(child);
 
 	local spellNames = {};
-	local oldType;
-	local row
-	local columnsTaken = 0;
 
-	for _, spell in pairs(self.spells) do
-		local type = spell.type;
-
-		if not oldType or type ~= oldType then
-			child:AddRow():AddElement(StdUi:Label(child, type));
-
-			row = child:AddRow();
-			columnsTaken = 0;
+	local spellListByType = {};
+	for _, spell in pairs(self.spellList) do
+		if not spellListByType[spell.type] then
+			spellListByType[spell.type] = {};
 		end
 
-		local spellName = GetSpellInfo(spell.spellID);
-		spellName = spellName:gsub('%s+', '');
+		tinsert(spellListByType[spell.type], spell);
+	end
 
-		if not spellNames[spellName] then
-			if columnsTaken >= 12 then
-				row = child:AddRow();
-				columnsTaken = 0;
+	GZT = {};
+GZT.spellListByType = spellListByType;
+
+	for type, spellList in pairs(spellListByType) do
+
+		child:AddRow():AddElement(StdUi:Label(child, type));
+		local row = child:AddRow();
+		local columnsTaken = 0;
+
+		for _, spell in pairs(spellList) do
+			local spellName = GetSpellInfo(spell.id);
+			spellName = spellName:gsub('%s+', '');
+
+			if not spellNames[spellName] then
+				if columnsTaken >= 12 then
+					row = child:AddRow();
+					columnsTaken = 0;
+				end
+
+				local option = StdUi:SpellCheckbox(child, nil, 20);
+				option:SetSpell(spell.id);
+
+				if self.db.blacklist[spellName] then option:SetChecked(true); end
+				option.OnValueChanged = function(scb, flag)
+					local shortName = scb.spellName:gsub('%s+', '');
+					self.db.blacklist[shortName] = flag and true or nil;
+				end
+
+				row:AddElement(option, { column = column });
+				columnsTaken = columnsTaken + column;
+				spellNames[spellName] = true;
 			end
-
-			local option = StdUi:SpellCheckbox(child, nil, 20);
-			option:SetSpell(spell.spellID);
-
-			if self.db.blacklist[spellName] then option:SetChecked(true); end
-			option.OnValueChanged = function(scb, flag)
-				local shortName = scb.spellName:gsub('%s+', '');
-				self.db.blacklist[shortName] = flag and true or nil;
-			end
-
-			row:AddElement(option, { column = column });
-			columnsTaken = columnsTaken + column;
-			spellNames[spellName] = true;
 		end
-
-		oldType = type;
 	end
 
 	return scrollFrame;

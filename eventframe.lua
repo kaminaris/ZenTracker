@@ -61,6 +61,10 @@ function ZT.ScanEvents(...)
 		event == 'SPELL_COOLDOWN_CHANGED'
 	then
 		ZT.eventHandlers:handle(event, type, 0)
+	elseif event == 'PLAYER_LEVEL_UP' then
+		ZT:addOrUpdateMember({GUID=UnitGUID("player"), level=type})
+	elseif event == 'COVENANT_CHOSEN' then
+		ZT:addOrUpdateMember({GUID=UnitGUID("player"), covenantID=ZT:updateCovenantInfo()})
 	end
 end
 
